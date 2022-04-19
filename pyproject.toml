@@ -1,0 +1,41 @@
+[tool.poetry]
+name = "Py-Boost"
+version = "0.1.7"
+description = "Python based GBDT"
+
+authors = ["Vakhrushev Anton <btbpanda@gmail.com>",
+           "Iosipoi Leonid"]
+           
+readme = "README.md"
+
+repository = "https://github.com/AILab-MLTools/Py-Boost"
+classifiers = [
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Natural Language :: Russian",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+
+]
+
+[tool.poetry.dependencies]
+
+python = ">=3.6.1, <3.10"
+
+scikit-learn = ">=0.22"
+numpy = "*"
+joblib = "*"
+numba = "*"
+
+pandas = ">=1"
+
+importlib-metadata = {version = "^1.0", python = "<3.8"}
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
