@@ -5,7 +5,6 @@ from .base import Ensemble
 
 def cluster_grow_tree(tree, group, arr, grad, hess, row_indexer, col_indexer, params):
     # create gh
-    n_out = grad.shape[1]
     gh = cp.concatenate((grad, hess), axis=1)
     out_indexer = cp.arange(gh.shape[1], dtype=cp.uint64)
 
@@ -164,9 +163,12 @@ class ClusterCandidates(Ensemble):
         self.models = []
 
         for d in self.depth_range:
-            builder = ClusterTreeBuilder(borders, max_depth=d, min_data_in_leaf=500, max_bin=max_bin)
+            builder = ClusterTreeBuilder(borders, max_depth=d, min_data_in_leaf=self.min_data_in_leaf, max_bin=max_bin)
             self.models.append(builder.build_tree(X_cp, y))
 
         self.base_score = np.zeros((1,), dtype=np.float32)
 
         return self
+
+    def predict(self, X, iterations=None, batch_size=100000):
+        return self.predict_leaves(X, iterations=iterations, batch_size=batch_size)[..., 0].T
