@@ -27,7 +27,7 @@ class Tree:
 
     Trees structure defines single node id value for each object
     Values assigned to the outpus are defined by arrays:
-        grouop_index, shape (nout, ). Defines the group id for predicting each output
+        group_index, shape (nout, ). Defines the group id for predicting each output
         values, shape (max_nodes, nout). Define output value for each node/output
         leaves, shape (max_nodes, ngroups). Assigns the leaf index to the terminal nodes
 

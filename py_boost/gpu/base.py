@@ -4,6 +4,7 @@ import cupy as cp
 import numpy as np
 
 from .utils import pinned_array
+from ..utils.quantization import quantize_features, apply_borders
 
 
 class Ensemble:

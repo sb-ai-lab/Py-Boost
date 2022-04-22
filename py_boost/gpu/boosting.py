@@ -1,17 +1,16 @@
 """Gradient boosting builder"""
 
 import cupy as cp
-import numpy as np
 
 from .base import Ensemble
 from .losses import loss_alias
 from .tree import DepthwiseTreeBuilder
-from .utils import pad_and_move
+from .utils import pad_and_move, validate_input, quantize_train_valid
+
 from ..callbacks.callback import EarlyStopping, EvalHistory, CallbackPipeline
 from ..multioutput.sketching import GradSketch
 from ..sampling.bagging import BaseSampler
 from ..multioutput.target_splitter import SingleSplitter, OneVsAllSplitter
-from ..utils.quantization import quantize_features, apply_borders
 
 
 class GradientBoosting(Ensemble):
@@ -188,37 +187,21 @@ class GradientBoosting(Ensemble):
         """
         assert self.models is None, 'Is already trained'
 
-        if eval_sets is None:
-            eval_sets = []
+        X, y, sample_weight, eval_sets = validate_input(X, y, sample_weight, eval_sets)
 
-        if len(y.shape) == 1:
-            y = y[:, np.newaxis]
-
-        if (sample_weight is not None) and (len(sample_weight.shape) == 1):
-            sample_weight = sample_weight[:, np.newaxis]
-
-        eval_sets = list(eval_sets)
-        for val_arr in eval_sets:
-            if len(val_arr['y'].shape) == 1:
-                val_arr['y'] = val_arr['y'][:, np.newaxis]
-
-            if 'sample_weight' not in val_arr:
-                val_arr['sample_weight'] = None
-
-            if (val_arr['sample_weight'] is not None) and (len(val_arr['sample_weight'].shape) == 1):
-                val_arr['sample_weight'] = val_arr['sample_weight'][:, np.newaxis]
-
-        cp.random.seed(self.seed)
         # fit and free memory
         mempool = cp.cuda.MemoryPool()
         with cp.cuda.using_allocator(allocator=mempool.malloc):
-            builder, build_info = self._create_build_info(mempool, X, y, sample_weight, eval_sets)
+            X_enc, max_bin, borders, eval_enc = quantize_train_valid(X, eval_sets, self.max_bin, self.quant_sample)
+
+            builder, build_info = self._create_build_info(mempool, X, X_enc, y, sample_weight,
+                                                          max_bin, borders, eval_sets, eval_enc)
             self._fit(builder, build_info)
         mempool.free_all_blocks()
 
         return self
 
-    def _create_build_info(self, mempool, X, y, sample_weight, eval_sets):
+    def _create_build_info(self, mempool, X, X_enc, y, sample_weight, max_bin, borders, eval_sets, eval_enc):
         """Quantize data, create tree builder and build_info
 
         Args:
@@ -232,25 +215,22 @@ class GradientBoosting(Ensemble):
             DepthwiseTreeBuilder, build_info
         """
         # quantization
+
         y = cp.array(y, order='C', dtype=cp.float32)
 
         if sample_weight is not None:
             sample_weight = cp.array(sample_weight, order='C', dtype=cp.float32)
 
-        max_bin = min(self.max_bin - 1, self.quant_sample, X.shape[0])
-        X_enc, borders = quantize_features(X, max_bin - 1, min(self.quant_sample, X.shape[0]))
-        max_bin = max((len(x) for x in borders))
-
         X_cp = pad_and_move(X_enc)
-        # save nfeatures for the feature importances
-        self.nfeats = X_cp.shape[1]
-        self.postprocess_fn = self.loss.postprocess_output
 
-        # apply quantization to valid data
-        X_val = [cp.array(apply_borders(x['X'], borders), order='C') for x in eval_sets]
+        X_val = [cp.array(x, order='C') for x in eval_enc]
         y_val = [cp.array(x['y'], order='C', dtype=cp.float32) for x in eval_sets]
         w_val = [None if x['sample_weight'] is None else cp.array(x['sample_weight'], order='C', dtype=cp.float32)
                  for x in eval_sets]
+
+        # save nfeatures for the feature importances
+        self.nfeats = X.shape[1]
+        self.postprocess_fn = self.loss.postprocess_output
 
         builder = DepthwiseTreeBuilder(borders,
                                        use_hess=self.use_hess,
@@ -265,6 +245,7 @@ class GradientBoosting(Ensemble):
                                        max_depth=self.max_depth,
                                        max_bin=max_bin
                                        )
+        cp.random.seed(self.seed)
 
         y = self.loss.preprocess_input(y)
         y_val = [self.loss.preprocess_input(x) for x in y_val]

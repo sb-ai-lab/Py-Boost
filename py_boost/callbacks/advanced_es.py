@@ -41,7 +41,7 @@ def get_grouped_stats(clusters, error, leaves_count, sample_weight=None):
     return esum, ecount
 
 
-def get_lvo_error(clusters, error, esum, ecount):
+def get_loo_error(clusters, error, esum, ecount):
     """Get Leave-One-Out error amonng cluster for each data point
 
     Args:
@@ -156,8 +156,8 @@ class AdvancedES(Callback):
 
         self.best_errors = esum / ecount
         # set lvo estimation
-        self.best_lvo_error = get_lvo_error(self.clusters, error, esum, ecount)
-        self.best_by_lvo_preds = [valid['ensemble'][-1]] * self.clusters.shape[1]
+        self.best_loo_error = get_loo_error(self.clusters, error, esum, ecount)
+        self.best_by_loo_preds = [valid['ensemble'][-1]] * self.clusters.shape[1]
         metric_val = float(self.model.metric(valid['target'][-1], self.model.postprocess_fn(valid['ensemble'][-1]),
                                              valid['sample_weight'][-1]))
         self.best_lvo_metrics = [metric_val] * self.clusters.shape[1]
@@ -225,19 +225,19 @@ class AdvancedES(Callback):
         self.best_iters = better * num_iter + (1 - better) * self.best_iters
 
         # estimate lvo to select best possible split after training
-        lvo_error = get_lvo_error(self.clusters, error, esum, ecount)
-        better = self.model.metric.compare(lvo_error, self.best_lvo_error)
-        self.best_lvo_error = lvo_error * better + self.best_lvo_error * (1 - better)
+        lvo_error = get_loo_error(self.clusters, error, esum, ecount)
+        better = self.model.metric.compare(lvo_error, self.best_loo_error)
+        self.best_loo_error = lvo_error * better + self.best_loo_error * (1 - better)
 
         valid = build_info['data']['valid']
 
         flg_update = False
         for i in range(ecount.shape[0]):
             bet = better[:, [i]]
-            self.best_by_lvo_preds[i] = valid['ensemble'][-1] * bet + \
-                                        self.best_by_lvo_preds[i] * (1 - bet)
+            self.best_by_loo_preds[i] = valid['ensemble'][-1] * bet + \
+                                        self.best_by_loo_preds[i] * (1 - bet)
             metric_val = float(
-                self.model.metric(valid['target'][-1], self.model.postprocess_fn(self.best_by_lvo_preds[i]),
+                self.model.metric(valid['target'][-1], self.model.postprocess_fn(self.best_by_loo_preds[i]),
                                   valid['sample_weight'][-1]))
 
             if self.model.metric.compare(metric_val, self.best_lvo_metrics[i]):
@@ -274,7 +274,7 @@ class AdvancedES(Callback):
             self.best_cluster_strategy, self.best_lvo_metrics[self.best_cluster_strategy])
         logger.info(msg)
 
-        del self.sample_weight, self.clusters, self.best_lvo_error, self.best_by_lvo_preds
+        del self.sample_weight, self.clusters, self.best_loo_error, self.best_by_loo_preds
         self.best_iters = self.best_iters.get()
         self.best_errors = self.best_errors.get()
         [x.to_cpu() for x in self.trees]

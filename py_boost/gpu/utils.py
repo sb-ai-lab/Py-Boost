@@ -5,6 +5,42 @@ import numba
 import cupy as cp
 import numpy as np
 
+from ..utils.quantization import quantize_features, apply_borders
+
+
+def validate_input(X, y, sample_weight=None, eval_sets=None):
+    if eval_sets is None:
+        eval_sets = []
+
+    if len(y.shape) == 1:
+        y = y[:, np.newaxis]
+
+    if (sample_weight is not None) and (len(sample_weight.shape) == 1):
+        sample_weight = sample_weight[:, np.newaxis]
+
+    eval_sets = list(eval_sets)
+    for val_arr in eval_sets:
+        if len(val_arr['y'].shape) == 1:
+            val_arr['y'] = val_arr['y'][:, np.newaxis]
+
+        if 'sample_weight' not in val_arr:
+            val_arr['sample_weight'] = None
+
+        if (val_arr['sample_weight'] is not None) and (len(val_arr['sample_weight'].shape) == 1):
+            val_arr['sample_weight'] = val_arr['sample_weight'][:, np.newaxis]
+
+    return X, y, sample_weight, eval_sets
+
+
+def quantize_train_valid(X, eval_sets, max_bin, quant_sample):
+    max_bin = min(max_bin - 1, quant_sample, X.shape[0])
+    X_enc, borders = quantize_features(X, max_bin - 1, min(quant_sample, X.shape[0]))
+    max_bin = max((len(x) for x in borders))
+
+    eval_enc = [apply_borders(x['X'], borders) for x in eval_sets]
+
+    return X_enc, max_bin, borders, eval_enc
+
 
 def pad_and_move(arr, pad_size=4):
     """Pad array memory placeholder to make feature size divisible by pad_size and move to GPU.

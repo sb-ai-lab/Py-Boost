@@ -12,6 +12,7 @@ if not _root_logger.hasHandlers():
 
 from .gpu.boosting import GradientBoosting
 from .gpu.sketch_boost import SketchBoost
+from .gpu.cv import CrossValidation
 
 __all__ = [
 
