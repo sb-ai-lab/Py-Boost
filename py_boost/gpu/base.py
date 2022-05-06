@@ -123,7 +123,7 @@ class Ensemble:
             raise ValueError('Different number of groups in trees')
 
         ngroups = check_grp[0]
-        leaves = pinned_array(np.empty((len(iterations), X.shape[0], ngroups), dtype=np.uint32))
+        leaves = pinned_array(np.empty((len(iterations), X.shape[0], ngroups), dtype=np.int32))
 
         map_streams = [cp.cuda.Stream(non_blocking=False) for _ in range(2)]
 

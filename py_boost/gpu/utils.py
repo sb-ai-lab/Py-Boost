@@ -772,7 +772,7 @@ def pinned_array(array):
 
 
 @numba.njit
-def set_leaf_values(feats):
+def set_leaf_values(feats, split):
     """Assign leaf indices to the terminal nodes
 
     Args:
@@ -781,12 +781,23 @@ def set_leaf_values(feats):
     Returns:
         np.ndarray of leaf indices
     """
-    leaves = np.zeros(feats.shape[::-1], dtype=np.uint32)
+    leaves = np.zeros(feats.shape[::-1], dtype=np.int32)
+    max_leaves = 0
 
     for i in range(feats.shape[0]):
+        
         acc = 0
+        
         for j in range(feats.shape[1]):
-            if feats[i, j] == -1:
-                leaves[j, i] = acc
-                acc += 1
-    return leaves
+            
+            if split[i, j, 0] != -1:
+                
+                for k in range(2):
+                    n = split[i, j, k]
+                    if feats[i, n] == -1:
+                        leaves[n, i] = acc
+                        acc += 1
+
+        max_leaves = max(max_leaves, acc)
+        
+    return leaves, max_leaves

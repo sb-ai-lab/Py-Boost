@@ -29,7 +29,7 @@ class Tree:
     Values assigned to the outpus are defined by arrays:
         grouop_index, shape (nout, ). Defines the group id for predicting each output
         values, shape (max_nodes, nout). Define output value for each node/output
-        leaves, shape (max_nodes, ngroups). Assigns the leaf index to the terminal nodes
+        leaves, shape (max_leaves, ngroups). Assigns the leaf index to the terminal nodes
 
     """
 
@@ -56,6 +56,7 @@ class Tree:
         self.values = None
         self.group_index = None
         self.leaves = None
+        self.max_leaves = None
 
     def set_nodes(self, group, unique_nodes, new_nodes_id, best_feat, best_gain, best_split, best_nan_left):
         """Write info about new nodes
@@ -110,7 +111,7 @@ class Tree:
         Returns:
 
         """
-        self.leaves = set_leaf_values(self.feats)
+        self.leaves, self.max_leaves = set_leaf_values(self.feats, self.split)
 
     def to_device(self):
         """Move tree data to the current GPU memory
@@ -177,7 +178,7 @@ class Tree:
         Returns:
             cp.ndarray of predictions
         """
-        return self.predict_from_nodes(self.predict_node(X))
+        return self.predict_from_nodes(self.predict_leaf_from_nodes(self.predict_node(X)))
 
     def predict_leaf(self, X):
         """Predict leaf indices from the feature matrix X
@@ -299,16 +300,24 @@ class DepthwiseTreeBuilder:
             nodes_group[:, n_grp] = train_nodes
             for vn, vp in zip(valid_nodes_group, valid_nodes):
                 vn[:, n_grp] = vp
+                
+        # transform nodes to leaves
+        tree.set_leaves()
+        leaves_idx, max_leaves, leaves_grp = cp.asarray(tree.leaves, dtype=cp.int32), tree.max_leaves, \
+            cp.arange(len(output_groups), dtype=cp.uint64)
+        
+        leaves = apply_values(nodes_group, leaves_grp, leaves_idx)
+        val_leaves = [apply_values(x, leaves_grp, leaves_idx) for x in valid_nodes_group]
 
         # calc nodes values
-        values = calc_node_values(grad, hess, nodes_group, row_indexer, group_index, max_nodes, self.params['lr'],
+        values = calc_node_values(grad, hess, leaves, row_indexer, group_index, max_leaves, self.params['lr'],
                                   lambda_l2=self.params['lambda_l2'])
         tree.set_borders(self.borders)
-
-        pred = apply_values(nodes_group, group_index, values)
-        val_preds = [apply_values(x, group_index, values) for x in valid_nodes_group]
-
-        tree.set_leaves()
+        
+        # transform leaves to values
+        pred = apply_values(leaves, group_index, values)
+        val_preds = [apply_values(x, group_index, values) for x in val_leaves]
+        
         tree.set_node_values(values.get(), group_index.get())
 
         return tree, nodes_group, pred, valid_nodes_group, val_preds
