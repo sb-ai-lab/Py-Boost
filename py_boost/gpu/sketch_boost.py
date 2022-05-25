@@ -61,19 +61,19 @@ class SketchBoost(GradientBoosting):
         if sketch_params is None:
             sketch_params = {}
             
-        if method == 'filter':
+        if sketch_method == 'filter':
             sketch = FilterSketch(sketch_outputs, **sketch_params)
             
-        elif method == 'svd':
+        elif sketch_method == 'svd':
             sketch = SVDSketch(sketch_outputs, **sketch_params)
             
-        elif method == 'topk':
+        elif sketch_method == 'topk':
             sketch = TopOutputsSketch(sketch_outputs, **sketch_params)
             
-        elif method == 'rand':
+        elif sketch_method == 'rand':
             sketch = RandomSamplingSketch(sketch_outputs, **sketch_params)
             
-        elif method == 'proj':
+        elif sketch_method == 'proj':
             sketch = RandomProjectionSketch(sketch_outputs, **sketch_params)
             
         else:
