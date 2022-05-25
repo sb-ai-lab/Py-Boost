@@ -28,6 +28,7 @@ class SketchBoost(GradientBoosting):
                  sample=True,
                  sketch_outputs=1,
                  sketch_method='filter',
+                 use_hess=True,
                  smooth=0.1,
                  callbacks=None,
                  sketch_params=None
@@ -54,6 +55,7 @@ class SketchBoost(GradientBoosting):
             sample: bool, if True random sampling is used, else keep top K
             sketch_outputs: int, number of outputs to keep
             sketch_method: str, name of the sketching strategy
+            use_hess: bool, use hessians in multioutput training
             smooth: float, smoothing parameter for sampling
             callbacks: list of Callback, callbacks to customize training are passed here
             sketch_params: dict, optional kwargs for sketching strategy
@@ -96,7 +98,7 @@ class SketchBoost(GradientBoosting):
                          quant_sample=quant_sample,
                          target_splitter='Single',
                          multioutput_sketch=sketch,
-                         use_hess=True,
+                         use_hess=use_hess,
                          es=es,
                          seed=seed,
                          verbose=verbose,
