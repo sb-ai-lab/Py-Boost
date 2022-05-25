@@ -76,6 +76,9 @@ class SketchBoost(GradientBoosting):
         elif sketch_method == 'proj':
             sketch = RandomProjectionSketch(sketch_outputs, **sketch_params)
             
+        elif sketch_method is None:
+            sketch = None
+            
         else:
             raise ValueError('Unknown sketching strategy')
 
