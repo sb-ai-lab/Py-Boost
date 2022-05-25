@@ -1,7 +1,7 @@
 """Implements SketchBoost for multioutput class"""
 
 from .boosting import GradientBoosting
-from ..multioutput.sketching import FilterSketch
+from ..multioutput.sketching import FilterSketch, TopOutputsSketch, SVDSketch, RandomSamplingSketch, RandomProjectionSketch
 
 
 class SketchBoost(GradientBoosting):
@@ -27,9 +27,10 @@ class SketchBoost(GradientBoosting):
                  verbose=10,
                  sample=True,
                  sketch_outputs=1,
-                 sketch_trees=1,
+                 sketch_method='filter,
                  smooth=0.1,
-                 callbacks=None
+                 callbacks=None,
+                 sketch_params=None
                  ):
         """
 
@@ -52,11 +53,31 @@ class SketchBoost(GradientBoosting):
             verbose: int, verbosity freq
             sample: bool, if True random sampling is used, else keep top K
             sketch_outputs: int, number of outputs to keep
-            sketch_trees: int, number of previously built trees to evaluate weights
+            sketch_method: str, name of the sketching strategy
             smooth: float, smoothing parameter for sampling
             callbacks: list of Callback, callbacks to customize training are passed here
+            sketch_params: dict, optional kwargs for sketching strategy
         """
-        sketch = FilterSketch(k=sketch_outputs, sample=sample, smooth=smooth, ntrees=sketch_trees)
+        if sketch_params is None:
+            sketch_params = {}
+            
+        if method == 'filter':
+            sketch = FilterSketch(sketch_outputs, **sketch_params)
+            
+        elif method == 'svd':
+            sketch = SVDSketch(sketch_outputs, **sketch_params)
+            
+        elif method == 'topk':
+            sketch = TopOutputsSketch(sketch_outputs, **sketch_params)
+            
+        elif method == 'rand':
+            sketch = RandomSamplingSketch(sketch_outputs, **sketch_params)
+            
+        elif method == 'proj':
+            sketch = RandomProjectionSketch(sketch_outputs, **sketch_params)
+            
+        else:
+            raise ValueError('Unknown sketching strategy')
 
         super().__init__(loss=loss,
                          metric=metric,
