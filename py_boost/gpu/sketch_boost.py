@@ -27,7 +27,7 @@ class SketchBoost(GradientBoosting):
                  verbose=10,
                  sample=True,
                  sketch_outputs=1,
-                 sketch_method='filter,
+                 sketch_method='filter',
                  smooth=0.1,
                  callbacks=None,
                  sketch_params=None
