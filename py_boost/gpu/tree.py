@@ -201,6 +201,7 @@ class DepthwiseTreeBuilder:
                  subsampler=None,
                  target_splitter=None,
                  multioutput_sketch=None,
+                 gd_steps=1,
                  **tree_params
                  ):
         """
@@ -230,8 +231,9 @@ class DepthwiseTreeBuilder:
         self.subsampler = subsampler
         self.target_grouper = target_splitter
         self.multioutput_sketch = multioutput_sketch
+        self.gd_steps = gd_steps
 
-    def build_tree(self, X, grad, hess, sample_weight=None, *val_arrays):
+    def build_tree(self, X, grad, hess, sample_weight=None, grad_fn=None, *val_arrays):
         """Build tree and return nodes/values predictions for train and validation sets
 
         Args:
@@ -300,24 +302,30 @@ class DepthwiseTreeBuilder:
             nodes_group[:, n_grp] = train_nodes
             for vn, vp in zip(valid_nodes_group, valid_nodes):
                 vn[:, n_grp] = vp
-                
+
         # transform nodes to leaves
         tree.set_leaves()
         leaves_idx, max_leaves, leaves_grp = cp.asarray(tree.leaves, dtype=cp.int32), tree.max_leaves, \
-            cp.arange(len(output_groups), dtype=cp.uint64)
-        
+                                             cp.arange(len(output_groups), dtype=cp.uint64)
+
         leaves = apply_values(nodes_group, leaves_grp, leaves_idx)
         val_leaves = [apply_values(x, leaves_grp, leaves_idx) for x in valid_nodes_group]
 
-        # calc nodes values
+        # perform multiple grad steps
         values = calc_node_values(grad, hess, leaves, row_indexer, group_index, max_leaves, self.params['lr'],
                                   lambda_l2=self.params['lambda_l2'])
-        tree.set_borders(self.borders)
-        
-        # transform leaves to values
         pred = apply_values(leaves, group_index, values)
+
+        tree.set_borders(self.borders)
+
+        for i in range(1, self.gd_steps):
+            grad, hess = grad_fn(pred)
+            values += calc_node_values(grad, hess, leaves, row_indexer, group_index, max_leaves, self.params['lr'],
+                                       lambda_l2=self.params['lambda_l2'])
+            pred = apply_values(leaves, group_index, values)
+
+        # transform leaves to values
         val_preds = [apply_values(x, group_index, values) for x in val_leaves]
-        
         tree.set_node_values(values.get(), group_index.get())
 
-        return tree, nodes_group, pred, valid_nodes_group, val_preds
+        return tree, leaves, pred, val_leaves, val_preds

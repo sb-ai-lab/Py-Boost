@@ -6,6 +6,30 @@ import cupy as cp
 import numpy as np
 
 
+def validate_input(X, y, sample_weight=None, eval_sets=None):
+    if eval_sets is None:
+        eval_sets = []
+
+    if len(y.shape) == 1:
+        y = y[:, np.newaxis]
+
+    if (sample_weight is not None) and (len(sample_weight.shape) == 1):
+        sample_weight = sample_weight[:, np.newaxis]
+
+    eval_sets = list(eval_sets)
+    for val_arr in eval_sets:
+        if len(val_arr['y'].shape) == 1:
+            val_arr['y'] = val_arr['y'][:, np.newaxis]
+
+        if 'sample_weight' not in val_arr:
+            val_arr['sample_weight'] = None
+
+        if (val_arr['sample_weight'] is not None) and (len(val_arr['sample_weight'].shape) == 1):
+            val_arr['sample_weight'] = val_arr['sample_weight'][:, np.newaxis]
+
+    return X, y, sample_weight, eval_sets
+
+
 def pad_and_move(arr, pad_size=4):
     """Pad array memory placeholder to make feature size divisible by pad_size and move to GPU.
     Returned array is the same size as input, but it is not contiguous.
@@ -785,13 +809,13 @@ def set_leaf_values(feats, split):
     max_leaves = 0
 
     for i in range(feats.shape[0]):
-        
+
         acc = 0
-        
+
         for j in range(feats.shape[1]):
-            
+
             if split[i, j, 0] != -1:
-                
+
                 for k in range(2):
                     n = split[i, j, k]
                     if feats[i, n] == -1:
@@ -799,5 +823,5 @@ def set_leaf_values(feats, split):
                         acc += 1
 
         max_leaves = max(max_leaves, acc)
-        
+
     return leaves, max_leaves

@@ -4,7 +4,7 @@ import cupy as cp
 import numpy as np
 
 from .utils import pinned_array
-
+from ..quantization.base import QuantileQuantizer, UniformQuantizer, UniquantQuantizer
 
 class Ensemble:
     """
@@ -23,6 +23,11 @@ class Ensemble:
         self.postprocess_fn = self._default_postprocess_fn
         self.base_score = None
         self._on_device = False
+
+        self.quantization = 'Quanntile'
+        self.quant_sample = 200000
+        self.max_bin = 256
+        self.min_data_in_bin = 3
 
     def to_device(self):
         """Move trained ensemble data to current GPU device
@@ -58,6 +63,37 @@ class Ensemble:
         """
         self.to_cpu()
         return self.__dict__
+
+    def quantize(self, X, eval_set):
+        """Fit and quantize all sets
+
+        Args:
+            X: np.ndarray, train features
+            eval_set: list of np.ndarrays, validation features
+
+        Returns:
+
+        """
+        quantizer = self.quantization
+
+        if type(quantizer) is str:
+
+            params = {'sample': self.quant_sample, 'max_bin': self.max_bin, 'min_data_in_bin': self.min_data_in_bin,
+                      'random_state': self.seed}
+
+            if self.quantization == 'Quantile':
+                quantizer = QuantileQuantizer(**params)
+            elif self.quantization == 'Uniform':
+                quantizer = UniformQuantizer(**params)
+            elif self.quantization == 'Uniquant':
+                quantizer = UniquantQuantizer(**params)
+            else:
+                raise ValueError('Unknown quantizer')
+
+        X_enc = quantizer.fit_transform(X)
+        eval_enc = [quantizer.transform(x['X']) for x in eval_set]
+
+        return X_enc, quantizer.get_max_bin(), quantizer.get_borders(), eval_enc
 
     def predict(self, X, batch_size=100000):
         """Make prediction for the feature matrix X
