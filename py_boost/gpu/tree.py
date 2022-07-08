@@ -102,7 +102,9 @@ class Tree:
         Returns:
 
         """
-        val_splits = [0 if x == -1 else borders[x][y] for (x, y) in zip(self.feats.ravel(), self.bin_splits.ravel())]
+        # borders - list of arrays. Array is borderlines
+        val_splits = [0 if x == -1 else borders[x][min(y, len(borders[x]) - 1)]
+                      for (x, y) in zip(self.feats.ravel(), self.bin_splits.ravel())]
         self.val_splits = np.array(val_splits, dtype=np.float32).reshape(self.feats.shape)
 
     def set_leaves(self):
