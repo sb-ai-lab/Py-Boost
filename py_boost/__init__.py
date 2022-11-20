@@ -1,5 +1,5 @@
-import sys
 import logging
+import sys
 
 _root_logger = logging.getLogger()
 _logger = logging.getLogger(__name__)
@@ -12,11 +12,20 @@ if not _root_logger.hasHandlers():
 
 from .gpu.boosting import GradientBoosting
 from .gpu.sketch_boost import SketchBoost
+from .utils.tl_wrapper import TLPredictor, TLCompiledPredictor
+from .callbacks.callback import Callback
+from .gpu.losses.losses import Loss
+from .gpu.losses.metrics import Metric
 
 __all__ = [
 
     'GradientBoosting',
     'SketchBoost',
+    'TLPredictor',
+    'TLCompiledPredictor',
+    'Callback',
+    'Loss',
+    'Metric',
     'callbacks',
     'gpu',
     'multioutput',

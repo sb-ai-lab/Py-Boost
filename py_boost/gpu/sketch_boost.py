@@ -33,7 +33,7 @@ class SketchBoost(GradientBoosting):
                  verbose=10,
 
                  sketch_outputs=1,
-                 sketch_method='filter',
+                 sketch_method='proj',
                  use_hess=True,
 
                  callbacks=None,

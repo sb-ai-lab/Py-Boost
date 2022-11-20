@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "Py-Boost"
-version = "0.2.1"
+version = "0.3.0"
 description = "Python based GBDT"
 
 authors = ["Vakhrushev Anton <btbpanda@gmail.com>",
@@ -24,14 +24,17 @@ classifiers = [
 
 [tool.poetry.dependencies]
 
-python = ">=3.7, <=3.9"
+python = ">=3.7, <3.10"
 
-scikit-learn = ">=0.22"
+scikit-learn = ">=1"
 numpy = "*"
 joblib = "*"
 numba = "*"
 
 pandas = ">=1"
+treelite = ">=3"
+treelite_runtime = ">=3"
+tqdm = ">=4.64.1"
 
 importlib-metadata = {version = "^1.0", python = "<3.8"}
 

@@ -104,7 +104,7 @@ class SVDSketch(GradSketch):
 class RandomSamplingSketch(GradSketch):
     """RandomSampling Sketching. Gradient columns are randomly sampled with probabilities."""
 
-    def __init__(self, n=10, smooth=0.1, replace=True):
+    def __init__(self, n=1, smooth=0.1, replace=True):
         """
 
         Args:
@@ -134,7 +134,7 @@ class RandomSamplingSketch(GradSketch):
 class RandomProjectionSketch(GradSketch):
     """Random projection sketch"""
 
-    def __init__(self, n, norm=True):
+    def __init__(self, n=1, norm=True):
         """
 
         Args:
