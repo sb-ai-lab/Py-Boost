@@ -20,6 +20,13 @@ Py-boost is a Python-based gradient boosting library which aims at overcoming th
 **Easy to customize**. Py-boost can be easily customized even if one is not familiar with GPU programming (just replace np with cp).  What can be customized? Almost everuthing via custom callbacks. Examples: Row/Col sampling strategy, Training control, Losses/metrics, Multioutput handling strategy, Anything via custom callbacks
 
 
+## SketchBoost [paper](https://openreview.net/forum?id=WSxarC8t-T)
+
+**Multioutput training**. Current state-of-atr boosting toolkits provide very limited support of multioutput training. And even if this option is available, training time for such tasks as multlcass/multilabel classification and multitask regression is quite slow because of the training complexity that scales linarly with the number of outputs. To overcomde the existing limitations we create **SketchBoost** algorithm that uses approximate tree structure search. As we show in [paper](https://openreview.net/forum?id=WSxarC8t-T) that stragegy at least does not lead to performance decrease and often is able to improve the accuracy
+
+**SketchBoost**. You can try our sketching strategies by using `SketchBoost` class or if you want you can implement your own and pass to the `GradientBoosting` constructor as `multioutput_sketch` parameter. For the details please see [Tutorial_2_Advanced_multioutput](https://github.com/AILab-MLTools/Py-Boost/blob/master/tutorials/Tutorial_2_Advanced_multioutput.ipynb)
+
+
 ## Installation
 
 Before installing py-boost via pip you should have cupy installed. You can use:
