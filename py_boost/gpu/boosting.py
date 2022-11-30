@@ -1,7 +1,9 @@
 """Gradient boosting builder"""
 
-import cupy as cp
-
+try:
+    import cupy as cp
+except Exception:
+    pass
 from .base import Ensemble
 from .losses import loss_alias
 from .tree import DepthwiseTreeBuilder
@@ -39,7 +41,9 @@ class GradientBoosting(Ensemble):
                  es=100,
                  seed=42,
                  verbose=10,
-                 callbacks=None
+                 callbacks=None,
+
+                 debug=False
                  ):
         """
 
@@ -74,6 +78,9 @@ class GradientBoosting(Ensemble):
             seed: int, random state
             verbose: int, verbosity freq
             callbacks: list of Callback, callbacks to customize training are passed here
+
+            debug: bool, if debug mode is enabled (it removes ability to use deprecated functions,
+                         thus optimizing memory usage)
         """
 
         super().__init__()
@@ -105,8 +112,9 @@ class GradientBoosting(Ensemble):
             'es': es,
             'seed': seed,
             'verbose': verbose,
-            'callbacks': callbacks
+            'callbacks': callbacks,
 
+            'debug': debug
         }
 
     def _infer_params(self):
@@ -221,7 +229,9 @@ class GradientBoosting(Ensemble):
             self.models.append(tree)
             # check exit info
             if self.callbacks.after_iteration(build_info):
+                tree.reformat(nfeats=self.nfeats, debug=self.params['debug'])
                 break
+            tree.reformat(nfeats=self.nfeats, debug=self.params['debug'])
 
         self.callbacks.after_train(build_info)
         self.base_score = self.base_score.get()

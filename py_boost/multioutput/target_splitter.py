@@ -1,6 +1,9 @@
 """Strategies to splitting multiple outputs by different trees"""
 
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 
 from ..callbacks.callback import Callback
 

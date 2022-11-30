@@ -1,10 +1,14 @@
 """Abstracts for the tree ensembles"""
 
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 import numpy as np
 
 from .utils import pinned_array
 from ..quantization.base import QuantileQuantizer, UniformQuantizer, UniquantQuantizer
+
 
 class Ensemble:
     """
@@ -24,10 +28,11 @@ class Ensemble:
         self.base_score = None
         self._on_device = False
 
-        self.quantization = 'Quanntile'
+        self.quantization = 'Quantile'
         self.quant_sample = 200000
         self.max_bin = 256
         self.min_data_in_bin = 3
+        self.seed = 42
 
     def to_device(self):
         """Move trained ensemble data to current GPU device
@@ -95,8 +100,8 @@ class Ensemble:
 
         return X_enc, quantizer.get_max_bin(), quantizer.get_borders(), eval_enc
 
-    def predict(self, X, batch_size=100000):
-        """Make prediction for the feature matrix X
+    def _predict_deprecated(self, X, batch_size=100000):
+        """(DEPRECATED) Make prediction for the feature matrix X
 
         Args:
             X: 2d np.ndarray of features
@@ -105,6 +110,7 @@ class Ensemble:
         Returns:
             prediction, 2d np.ndarray of float32, shape (n_data, n_outputs)
         """
+
         self.to_device()
         prediction = pinned_array(np.empty((X.shape[0], self.base_score.shape[0]), dtype=np.float32))
 
@@ -123,7 +129,7 @@ class Ensemble:
                 result = cp.zeros((x_batch.shape[0], self.base_score.shape[0]), dtype=np.float32)
                 result[:] = self.base_score
                 for n, tree in enumerate(self.models):
-                    result += tree.predict(gpu_batch)
+                    result += tree._predict_deprecated(gpu_batch)
 
                 self.postprocess_fn(result).get(stream=st, out=prediction[i: i + x_batch.shape[0]])
 
@@ -136,8 +142,8 @@ class Ensemble:
         curr_stream.synchronize()
         return prediction
 
-    def predict_leaves(self, X, iterations=None, batch_size=100000):
-        """Predict tree leaf indices for the feature matrix X
+    def _predict_leaves_deprecated(self, X, iterations=None, batch_size=100000):
+        """(DEPRECATED) Predict tree leaf indices for the feature matrix X
 
         Args:
             X: 2d np.ndarray of features
@@ -150,7 +156,13 @@ class Ensemble:
             For n_groups explanation check Tree class
         """
         if iterations is None:
-            iterations = range(len(self.models))
+            iterations = list(range(len(self.models)))
+        if len(iterations) == 0:
+            return np.empty(0, dtype=np.float32)
+        if min(iterations) < 0 or max(iterations) >= len(self.models):
+            raise Exception("Invalid stage numbers")
+        if all(isinstance(el, int) for el in iterations) is False:
+            raise Exception("Stage numbers must be int type")
 
         self.to_device()
 
@@ -173,7 +185,7 @@ class Ensemble:
                 gpu_batch.set(x_batch, stream=st)
 
                 for j, n in enumerate(iterations):
-                    self.models[n].predict_leaf(gpu_batch).get(stream=st, out=leaves[j, i: i + x_batch.shape[0]])
+                    self.models[n]._predict_leaf_deprecated(gpu_batch).get(stream=st, out=leaves[j, i: i + x_batch.shape[0]])
 
                 stop_event = st.record()
                 stop_events.append(stop_event)
@@ -184,8 +196,8 @@ class Ensemble:
         curr_stream.synchronize()
         return leaves
 
-    def predict_staged(self, X, iterations=None, batch_size=100000):
-        """Make prediction from different stages for the feature matrix X
+    def _predict_staged_deprecated(self, X, iterations=None, batch_size=100000):
+        """(DEPRECATED) Make prediction from different stages for the feature matrix X
 
         Args:
             X: 2d np.ndarray of features
@@ -196,8 +208,16 @@ class Ensemble:
         Returns:
             prediction, 2d np.ndarray of float32, shape (n_iterations, n_data, n_out)
         """
+
+        # Iteration list validation
         if iterations is None:
             iterations = list(range(len(self.models)))
+        if len(iterations) == 0:
+            return np.empty(0, dtype=np.float32)
+        if min(iterations) < 0 or max(iterations) >= len(self.models):
+            raise Exception("Invalid stage numbers")
+        if all(isinstance(el, int) for el in iterations) is False:
+            raise Exception("Stage numbers must be int type")
 
         self.to_device()
         prediction = pinned_array(np.empty((len(iterations), X.shape[0], self.base_score.shape[0]), dtype=np.float32))
@@ -218,7 +238,7 @@ class Ensemble:
 
                 next_out = 0
                 for n, tree in enumerate(self.models):
-                    result += tree.predict(gpu_batch)
+                    result += tree._predict_deprecated(gpu_batch)
                     if n == iterations[next_out]:
                         self.postprocess_fn(result).get(
                             stream=st, out=prediction[next_out, i: i + x_batch.shape[0]]
@@ -237,8 +257,8 @@ class Ensemble:
         curr_stream.synchronize()
         return prediction
 
-    def get_feature_importance(self, imp_type='split'):
-        """Get feature importance
+    def _get_feature_importance_deprecated(self, imp_type='split'):
+        """(DEPRECATED) Get feature importance
 
         Args:
             imp_type: str, importance type, 'split' or 'gain'
@@ -257,3 +277,378 @@ class Ensemble:
             np.add.at(importance, tree.feats[sl], acc_val)
 
         return importance
+
+    def get_feature_importance(self, imp_type='split'):
+        """Get feature importance
+
+        Args:
+            imp_type: str, importance type, 'split' or 'gain'
+
+        Returns:
+            importance: np.ndarray 1d of float32, shape (n_features)
+        """
+        if imp_type not in ['gain', 'split']:
+            raise ValueError("Importance type should be 'gain' or 'split'")
+        importance = np.zeros(self.nfeats, dtype=np.float32)
+
+        for tree in self.models:
+            if imp_type == 'split':
+                if type(tree.test_importance_split) is not np.ndarray:
+                    importance += tree.test_importance_split.get()
+                else:
+                    importance += tree.test_importance_split
+            else:
+                if type(tree.test_importance_gain) is not np.ndarray:
+                    importance += tree.test_importance_gain.get()
+                else:
+                    importance += tree.test_importance_gain
+
+        return importance
+
+    def predict_leaves(self, X, iterations=None, batch_size=100_000):
+        """Predict tree leaf indices for the feature matrix X
+
+        Args:
+            X: 2d np.ndarray of float32, array of features
+            iterations: list of int or None. If list of ints is passed, prediction will be made only
+                for given iterations, otherwise - for all iterations
+            batch_size: int, inner batch splitting size to avoid OOM
+
+        Returns:
+            prediction, np.ndarray 2d of int32, shape (n_iterations, n_data, n_groups).
+            For n_groups explanation check Tree class
+        """
+        if batch_size <= 0 or not isinstance(batch_size, int):
+            raise ValueError("Batch size must be a positive integer")
+
+        if iterations is None:
+            iterations = list(range(len(self.models)))
+        if len(iterations) == 0:
+            return np.empty(0, dtype=np.float32)
+        if min(iterations) < 0 or max(iterations) >= len(self.models):
+            raise ValueError("Invalid stage numbers")
+        if all(isinstance(el, int) for el in iterations) is False:
+            raise ValueError("Stage numbers must be int type")
+        if len(set(iterations)) != len(iterations):
+            raise ValueError("Duplicate values in stages are not allowed")
+
+        check_grp = np.unique([x.ngroups for x in self.models])
+        if check_grp.shape[0] > 1:
+            raise ValueError('Different number of groups in trees')
+        ngroups = check_grp[0]
+
+        self.to_device()
+        # special case handle, if X is already on device or size of X <= batch_size
+        if type(X) is cp.ndarray or X.shape[0] <= batch_size:
+            is_on_gpu = True
+            if type(X) is not cp.ndarray:
+                is_on_gpu = False
+                X = cp.array(X, dtype=cp.float32)
+            gpu_pred = cp.empty((len(iterations), X.shape[0], ngroups), dtype=np.int32)
+
+            for j, n in enumerate(iterations):
+                self.models[n].predict_leaf(X, gpu_pred[j])
+
+            cp.cuda.get_current_stream().synchronize()
+            if is_on_gpu:
+                return gpu_pred
+            return gpu_pred.get()
+
+        n_streams = 2  # don't change
+        map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
+
+        # result allocation
+        cpu_leaves_full = np.empty((len(iterations), X.shape[0], ngroups), dtype=np.int32)
+        cpu_leaves = [pinned_array(np.empty((len(iterations), batch_size, ngroups), dtype=np.int32)) for _ in range(n_streams)]
+        gpu_leaves = [cp.empty((len(iterations), batch_size, ngroups), dtype=cp.int32) for _ in range(n_streams)]
+
+        # batch allocation
+        cpu_batch = [pinned_array(np.empty(X[0:batch_size].shape, dtype=np.float32)) for _ in range(n_streams)]
+        gpu_batch = [cp.empty(X[0:batch_size].shape, dtype=cp.float32) for _ in range(n_streams)]
+
+        cpu_batch_free_event = [None, None]
+        gpu_batch_free_event = [None, None]
+        cpu_out_ready_event = [None, None]
+        last_batch_size = 0
+        last_n_stream = 0
+        for k, i in enumerate(range(0, X.shape[0], batch_size)):
+            nst = k % n_streams
+            with map_streams[nst] as stream:
+                real_batch_len = batch_size if i + batch_size <= X.shape[0] else X.shape[0] - i
+
+                # if cpu_batch is available, copy X batch to pinned memory on H
+                if k >= 2:
+                    cpu_batch_free_event[nst].synchronize()
+                cpu_batch[nst][:real_batch_len] = X[i:i + real_batch_len].astype(np.float32)
+
+                # copy X batch from pinned memory to D
+                if k >= 2:
+                    gpu_batch_free_event[nst].synchronize()
+                gpu_batch[nst][:real_batch_len].set(cpu_batch[nst][:real_batch_len])
+                cpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
+
+                # when gpu_leaves is available and cpu_out is ready, proceed to the prediction
+                if k >= 2:
+                    cpu_out_ready_event[nst].synchronize()
+                for j, n in enumerate(iterations):
+                    self.models[n].predict_leaf(gpu_batch[nst][:real_batch_len], gpu_leaves[nst][j][:real_batch_len])
+                gpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
+
+                # copy prediction from pinned memory to pageable memory on H (from previous iteration)
+                if k >= 2:
+                    for j, n in enumerate(iterations):
+                        cpu_leaves_full[j][i - 2 * batch_size: i - batch_size] = cpu_leaves[nst][j][:batch_size]
+
+                # copy predictions from device to pinned memory on H
+                gpu_leaves[nst][:real_batch_len].get(out=cpu_leaves[nst][:real_batch_len])
+                cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
+
+                last_batch_size = real_batch_len
+                last_n_stream = nst
+
+        with map_streams[1 - last_n_stream] as stream:
+            cpu_out_ready_event[1 - last_n_stream].synchronize()
+            for j, n in enumerate(iterations):
+                cpu_leaves_full[j][X.shape[0] - (batch_size + last_batch_size): X.shape[0] - last_batch_size] = \
+                    cpu_leaves[1 - last_n_stream][j][:batch_size]
+        with map_streams[last_n_stream] as stream:
+            cpu_out_ready_event[last_n_stream].synchronize()
+            for j, n in enumerate(iterations):
+                cpu_leaves_full[j][X.shape[0] - last_batch_size:] = cpu_leaves[last_n_stream][j][:last_batch_size]
+
+        return cpu_leaves_full
+
+    def predict(self, X, batch_size=100_000):
+        """Make prediction for the feature matrix X
+
+        Args:
+            X: np.ndarray 2d of float32, array of features
+            batch_size: int, inner batch splitting size to avoid OOM
+
+        Returns:
+            prediction: np.ndarray 2d of float32, shape (n_data, n_outputs)
+        """
+        if batch_size <= 0 or not isinstance(batch_size, int):
+            raise ValueError("Batch size must be a positive integer")
+
+        check_grp = np.unique([x.ngroups for x in self.models])
+        if check_grp.shape[0] > 1:
+            raise ValueError('Different number of groups in trees')
+        ngroups = check_grp[0]
+        n_out = self.base_score.shape[0]
+
+        self.to_device()
+        # special case handle, if X is already on device or size of X <= batch_size
+        if type(X) is cp.ndarray or X.shape[0] <= batch_size:
+            is_on_gpu = True
+            if type(X) is not cp.ndarray:
+                is_on_gpu = False
+                X = cp.array(X, dtype=cp.float32)
+            # TODO: what if float64 on device or even int
+            gpu_pred = cp.empty((X.shape[0], n_out), dtype=cp.float32)
+            gpu_pred_leaves = cp.empty((X.shape[0], ngroups), dtype=cp.int32)
+
+            gpu_pred[:] = self.base_score
+
+            for tree in self.models:
+                tree.predict(X, gpu_pred, gpu_pred_leaves)
+
+            cp.cuda.get_current_stream().synchronize()
+            pred = self.postprocess_fn(gpu_pred)
+            if is_on_gpu:
+                return pred
+            return pred.get()
+
+        # cuda stream allocation
+        n_streams = 2  # don't change
+        map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
+
+        # result allocation
+        cpu_pred_full = np.empty((X.shape[0], n_out), dtype=np.float32)
+        cpu_pred = [pinned_array(np.empty((batch_size, n_out), dtype=np.float32)) for _ in range(n_streams)]
+        gpu_pred = [cp.empty((batch_size, n_out), dtype=cp.float32) for _ in range(n_streams)]
+
+        # temp buffer for leaves
+        gpu_pred_leaves = [cp.empty((batch_size, ngroups), dtype=cp.int32) for _ in range(n_streams)]
+
+        # batch allocation
+        cpu_batch = [pinned_array(np.empty(X[0:batch_size].shape, dtype=np.float32)) for _ in range(n_streams)]
+        gpu_batch = [cp.empty(X[0:batch_size].shape, dtype=cp.float32) for _ in range(n_streams)]
+
+        cpu_batch_free_event = [None, None]
+        gpu_batch_free_event = [None, None]
+        cpu_out_ready_event = [None, None]
+        last_batch_size = 0
+        last_n_stream = 0
+        for k, i in enumerate(range(0, X.shape[0], batch_size)):
+            nst = k % n_streams
+            with map_streams[nst] as stream:
+                real_batch_len = batch_size if i + batch_size <= X.shape[0] else X.shape[0] - i
+
+                # if cpu_batch is available, copy X batch to pinned memory on H
+                if k >= 2:
+                    cpu_batch_free_event[nst].synchronize()
+                cpu_batch[nst][:real_batch_len] = X[i:i + real_batch_len].astype(cp.float32)
+
+                # copy X batch from pinned memory to D
+                if k >= 2:
+                    gpu_batch_free_event[nst].synchronize()
+                gpu_batch[nst][:real_batch_len].set(cpu_batch[nst][:real_batch_len])
+                cpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
+
+                # when gpu_pred is available and cpu_out is ready, proceed to the prediction
+                if k >= 2:
+                    cpu_out_ready_event[nst].synchronize()
+                gpu_pred[nst][:] = self.base_score
+                for tree in self.models:
+                    tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len],
+                                 gpu_pred_leaves[nst][:real_batch_len])
+                gpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
+
+                # copy prediction from pinned memory to pageable memory on H (from previous iteration)
+                if k >= 2:
+                    cpu_pred_full[i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:batch_size]
+
+                # copy predictions from device to pinned memory on H
+                self.postprocess_fn(gpu_pred[nst][:real_batch_len]).get(out=cpu_pred[nst][:real_batch_len])
+                cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
+
+                last_batch_size = real_batch_len
+                last_n_stream = nst
+
+        # waiting for sync of last two batches
+        with map_streams[1 - last_n_stream]:
+            cpu_out_ready_event[1 - last_n_stream].synchronize()
+            cpu_pred_full[X.shape[0] - (batch_size + last_batch_size): X.shape[0] - last_batch_size] = \
+                cpu_pred[1 - last_n_stream][:batch_size]
+        with map_streams[last_n_stream]:
+            cpu_out_ready_event[last_n_stream].synchronize()
+            cpu_pred_full[X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:last_batch_size]
+
+        return cpu_pred_full
+
+    def predict_staged(self, X, iterations=None, batch_size=100_000):
+        """Make prediction from different stages for the feature matrix X
+
+        Args:
+            X: 2d np.ndarray of float32, array of features
+            iterations: list of int or None. If list of ints is passed, prediction will be made only
+                for given iterations, otherwise - for all iterations
+            batch_size: int, inner batch splitting size to avoid OOM
+
+        Returns:
+            prediction, np.ndarray 2d of float32, shape (n_iterations, n_data, n_out)
+        """
+        if batch_size <= 0 or not isinstance(batch_size, int):
+            raise ValueError("Batch size must be a positive integer")
+
+        if iterations is None:
+            iterations = list(range(len(self.models)))
+        if len(iterations) == 0:
+            return np.empty(0, dtype=np.float32)
+        if min(iterations) < 0 or max(iterations) >= len(self.models):
+            raise ValueError("Invalid stage numbers")
+        if all(isinstance(el, int) for el in iterations) is False:
+            raise ValueError("Stage numbers must be int type")
+        if len(set(iterations)) != len(iterations):
+            raise ValueError("Duplicate values in stages are not allowed")
+        if sorted(iterations) != iterations:
+            raise ValueError("Stages in iterations list should be sorted in ascending order beforehand")
+
+        check_grp = np.unique([x.ngroups for x in self.models])
+        if check_grp.shape[0] > 1:
+            raise ValueError('Different number of groups in trees')
+        n_groups = check_grp[0]
+        n_out = self.base_score.shape[0]
+
+        self.to_device()
+        # special case handle, if X is already on device or size of X <= batch_size
+        if type(X) is cp.ndarray or X.shape[0] <= batch_size:
+            is_on_gpu = True
+            if type(X) is not cp.ndarray:
+                is_on_gpu = False
+                X = cp.array(X, dtype=cp.float32)
+                pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=np.float32)
+            else:
+                pred_full = cp.empty((len(iterations), X.shape[0], n_out), dtype=cp.float32)
+            gpu_pred = cp.empty((X.shape[0], n_out), dtype=cp.float32)
+            gpu_pred_leaves = cp.empty((X.shape[0], n_groups), dtype=cp.int32)
+
+            gpu_pred[:] = self.base_score
+            next_out = 0
+            for n, tree in enumerate(self.models):
+                tree.predict(X, gpu_pred, gpu_pred_leaves)
+                if n == iterations[next_out]:
+                    if is_on_gpu:
+                        pred_full[next_out] = self.postprocess_fn(gpu_pred)
+                    else:
+                        self.postprocess_fn(gpu_pred).get(out=pred_full[next_out])
+                    next_out += 1
+                    if next_out >= len(iterations):
+                        cp.cuda.get_current_stream().synchronize()
+                        return pred_full
+
+        n_streams = 2  # don't change
+        map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
+
+        # result allocation
+        cpu_pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=np.float32)
+        cpu_pred = [pinned_array(np.empty((len(iterations), batch_size, n_out), dtype=np.float32)) for _ in range(n_streams)]
+        gpu_pred = [cp.empty((batch_size, n_out), dtype=cp.float32) for _ in range(n_streams)]
+
+        # temp buffer for leaves
+        gpu_pred_leaves = [cp.empty((batch_size, n_groups), dtype=cp.int32) for _ in range(n_streams)]
+
+        # batch allocation
+        cpu_batch = [pinned_array(np.empty(X[0:batch_size].shape, dtype=np.float32)) for _ in range(n_streams)]
+        gpu_batch = [cp.empty(X[0:batch_size].shape, dtype=np.float32) for _ in range(n_streams)]
+
+        cpu_batch_free_event = [None, None]
+        cpu_out_ready_event = [None, None]
+        last_batch_size = 0
+        last_n_stream = 0
+        for k, i in enumerate(range(0, X.shape[0], batch_size)):
+            nst = k % n_streams
+            with map_streams[nst] as stream:
+                real_batch_len = batch_size if i + batch_size <= X.shape[0] else X.shape[0] - i
+
+                # if cpu_batch is available, copy X batch to pinned memory on H
+                if k >= 2:
+                    cpu_batch_free_event[nst].synchronize()
+                cpu_batch[nst][:real_batch_len] = X[i:i + real_batch_len].astype(np.float32)
+
+                # copy X batch from pinned memory to D
+                if k >= 2:
+                    cpu_out_ready_event[nst].synchronize()
+                gpu_batch[nst][:real_batch_len].set(cpu_batch[nst][:real_batch_len])
+                cpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
+                gpu_pred[nst][:] = self.base_score
+
+                # copy prediction from pinned memory to pageable memory on H (from previous iteration)
+                if k >= 2:
+                    cpu_pred_full[:, i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:, :batch_size]
+
+                i_next = 0
+                for i_tree, tree in enumerate(self.models):
+                    tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len],
+                                 gpu_pred_leaves[nst][:real_batch_len])
+                    if iterations[i_next] == i_tree:
+                        self.postprocess_fn(gpu_pred[nst][:real_batch_len]).get(out=cpu_pred[nst][i_next][:real_batch_len])
+                        i_next += 1
+                        if i_next >= len(iterations):
+                            break
+                cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
+
+                last_batch_size = real_batch_len
+                last_n_stream = nst
+
+        # waiting for sync of last two batches
+        with map_streams[1 - last_n_stream]:
+            cpu_out_ready_event[1 - last_n_stream].synchronize()
+            cpu_pred_full[:, X.shape[0] - (batch_size + last_batch_size): X.shape[0] - last_batch_size] =\
+                cpu_pred[1 - last_n_stream][:, :batch_size]
+        with map_streams[last_n_stream]:
+            cpu_out_ready_event[last_n_stream].synchronize()
+            cpu_pred_full[:, X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:, :last_batch_size]
+
+        return cpu_pred_full

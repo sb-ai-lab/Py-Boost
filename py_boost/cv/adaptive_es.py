@@ -1,7 +1,10 @@
 """Adaptive early stopping"""
 
 import numpy as np
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 from copy import deepcopy
 from numba import njit
 

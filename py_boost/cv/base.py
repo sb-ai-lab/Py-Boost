@@ -1,7 +1,10 @@
 """Gradient Boosting with built-in cross validation"""
 
 import numpy as np
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 from copy import deepcopy
 
 from sklearn.model_selection import KFold, StratifiedKFold
