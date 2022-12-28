@@ -47,7 +47,7 @@ class EnsembleInference:
         self.n_feat = ensemble.nfeats
         self.n_out = len(ensemble.base_score)
         self.base_score = ensemble.base_score.copy()
-        self.postprocess_fn = self._default_postprocess_fn
+        self.postprocess_fn = ensemble.postprocess_fn
         self._on_device = False
 
     def to_device(self):

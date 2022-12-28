@@ -39,7 +39,9 @@ class GradientBoosting(Ensemble):
                  es=100,
                  seed=42,
                  verbose=10,
-                 callbacks=None
+                 callbacks=None,
+
+                 debug=False
                  ):
         """
 
@@ -105,7 +107,9 @@ class GradientBoosting(Ensemble):
             'es': es,
             'seed': seed,
             'verbose': verbose,
-            'callbacks': callbacks
+            'callbacks': callbacks,
+
+            'debug': debug
 
         }
 
@@ -298,6 +302,8 @@ class GradientBoosting(Ensemble):
                                        lambda_l2=self.lambda_l2,
                                        max_depth=self.max_depth,
                                        max_bin=max_bin,
+
+                                       debug=self.params['debug'],
                                        )
         cp.random.seed(self.seed)
 

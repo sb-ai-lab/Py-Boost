@@ -149,8 +149,6 @@ class ClusterTreeBuilder:
         tree.set_leaves()
         tree.set_node_values(np.zeros((max_nodes, 1), dtype=np.float32), np.zeros((1,), dtype=np.uint64))
 
-        tree.reformat()
-
         return tree
 
 

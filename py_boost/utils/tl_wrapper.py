@@ -6,13 +6,11 @@ import treelite
 import treelite_runtime as tl_run
 
 
-def create_node(tree, node_id):
-    """Create a node of treelite tree
-
+def _create_node_deprecated(tree, node_id):
+    """(DEPRECATED) Create a node of treelite tree
     Args:
         tree: Py-Boost Tree, tree to parse
         node_id: int, node index
-
     Returns:
         dict, args of treelite.ModelBuilder.Tree .set_numerical_test_node or .set_leaf_node
     """
@@ -35,7 +33,74 @@ def create_node(tree, node_id):
     return {'value': tree.values[tree.leaves[node_id][0]]}, None, None
 
 
+def create_node(tree, node_id, new_id):
+    """Create a node of treelite tree
+
+    Args:
+        tree: Py-Boost Tree, tree to parse
+        node_id: int, node index in original format tree
+        new_id: int, node index in new tree format
+
+    Returns:
+        dict, args of treelite.ModelBuilder.Tree .set_numerical_test_node
+    """
+
+    assert node_id >= 0
+
+    feature_id = int(tree.new_format[node_id * 4])
+    nan_left = feature_id > 0
+    feature_id = abs(feature_id) - 1
+
+    left = int(tree.new_format[node_id * 4 + 2])
+    right = int(tree.new_format[node_id * 4 + 3])
+    node = {
+        'feature_id': feature_id,
+        'opname': '<=',
+        'threshold': tree.new_format[node_id * 4 + 1],
+        'default_left': nan_left,
+        'left_child_key': new_id + 1,
+        'right_child_key': new_id + 2,
+    }
+
+    return node, (left, new_id + 1), (right, new_id + 2)
+
+
 def parse_pb_tree(tree):
+    """Parse s single Py-Boost Tree to treelite.ModelBuilder.Tree format
+
+    Args:
+        tree: Py-Boost tree
+
+    Returns:
+        treelite.ModelBuilder.Tree
+    """
+    assert tree.ngroups == 1, 'Models with more than 1 group are not currently supported'
+
+    tl_tree = treelite.ModelBuilder.Tree()
+    curr_nodes = [(0, 0)]  # (old_id, new_id)
+
+    while len(curr_nodes) > 0:
+        old_id, new_id = curr_nodes.pop(0)
+        curr_node, left, right = create_node(tree, old_id, new_id)
+        tl_tree[new_id]
+        tl_tree[new_id].set_numerical_test_node(**curr_node)
+
+        if left[0] >= 0:
+            curr_nodes.append(left)
+        else:
+            tl_tree[left[1]]
+            tl_tree[left[1]].set_leaf_node(tree.values[abs(left[0]) - 1])
+        if right[0] >= 0:
+            curr_nodes.append(right)
+        else:
+            tl_tree[right[1]]
+            tl_tree[right[1]].set_leaf_node(tree.values[abs(right[0]) - 1])
+
+    tl_tree[0].set_root()
+    return tl_tree
+
+
+def _parse_pb_tree_deprecated(tree):
     """Parse s single Py-Boost Tree to treelite.ModelBuilder.Tree format
 
     Args:
@@ -55,7 +120,7 @@ def parse_pb_tree(tree):
 
         for node_id in curr_nodes:
 
-            curr_node, left, right = create_node(tree, node_id)
+            curr_node, left, right = _create_node_deprecated(tree, node_id)
             # add node
             tl_tree[node_id]
             if left is not None:

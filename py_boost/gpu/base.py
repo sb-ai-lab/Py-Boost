@@ -96,7 +96,7 @@ class Ensemble:
 
         return X_enc, quantizer.get_max_bin(), quantizer.get_borders(), eval_enc
 
-    def predict_deprecated(self, X, batch_size=100000):
+    def _predict_deprecated(self, X, batch_size=100000):
         """(DEPRECATED) Make prediction for the feature matrix X
 
         Args:
@@ -106,6 +106,7 @@ class Ensemble:
         Returns:
             prediction, 2d np.ndarray of float32, shape (n_data, n_outputs)
         """
+
         self.to_device()
         prediction = pinned_array(np.empty((X.shape[0], self.base_score.shape[0]), dtype=np.float32))
 
@@ -124,7 +125,7 @@ class Ensemble:
                 result = cp.zeros((x_batch.shape[0], self.base_score.shape[0]), dtype=np.float32)
                 result[:] = self.base_score
                 for n, tree in enumerate(self.models):
-                    result += tree.predict_deprecated(gpu_batch)
+                    result += tree._predict_deprecated(gpu_batch)
 
                 self.postprocess_fn(result).get(stream=st, out=prediction[i: i + x_batch.shape[0]])
 
@@ -137,7 +138,7 @@ class Ensemble:
         curr_stream.synchronize()
         return prediction
 
-    def predict_leaves_deprecated(self, X, iterations=None, batch_size=100000):
+    def _predict_leaves_deprecated(self, X, iterations=None, batch_size=100000):
         """(DEPRECATED) Predict tree leaf indices for the feature matrix X
 
         Args:
@@ -174,7 +175,7 @@ class Ensemble:
                 gpu_batch.set(x_batch, stream=st)
 
                 for j, n in enumerate(iterations):
-                    self.models[n].predict_leaf_deprecated(gpu_batch).get(stream=st, out=leaves[j, i: i + x_batch.shape[0]])
+                    self.models[n]._predict_leaf_deprecated(gpu_batch).get(stream=st, out=leaves[j, i: i + x_batch.shape[0]])
 
                 stop_event = st.record()
                 stop_events.append(stop_event)
@@ -185,7 +186,7 @@ class Ensemble:
         curr_stream.synchronize()
         return leaves
 
-    def predict_staged_deprecated(self, X, iterations=None, batch_size=100000):
+    def _predict_staged_deprecated(self, X, iterations=None, batch_size=100000):
         """(DEPRECATED) Make prediction from different stages for the feature matrix X
 
         Args:
@@ -219,7 +220,7 @@ class Ensemble:
 
                 next_out = 0
                 for n, tree in enumerate(self.models):
-                    result += tree.predict_deprecated(gpu_batch)
+                    result += tree._predict_deprecated(gpu_batch)
                     if n == iterations[next_out]:
                         self.postprocess_fn(result).get(
                             stream=st, out=prediction[next_out, i: i + x_batch.shape[0]]
@@ -238,7 +239,7 @@ class Ensemble:
         curr_stream.synchronize()
         return prediction
 
-    def get_feature_importance_deprecated(self, imp_type='split'):
+    def _get_feature_importance_deprecated(self, imp_type='split'):
         """(DEPRECATED) Get feature importance
 
         Args:
@@ -343,7 +344,7 @@ class Ensemble:
                 stream.synchronize()
                 cpu_leaves_full[X.shape[0] - last_batch_size:] = cpu_leaves[last_n_stream][:last_batch_size]
 
-        return cpu_leaves_full
+        return np.transpose(cpu_leaves_full, (1, 0, 2))
 
     def get_feature_importance(self, imp_type='split'):
         """Get feature importance
@@ -364,9 +365,7 @@ class Ensemble:
                 feats = abs(tree.new_format[::4].copy()).astype(int) - 1
                 np.add.at(importance, feats, 1)
             else:
-                sl = tree.feats >= 0
-                acc_val = tree.gains[sl]
-                np.add.at(importance, tree.feats[sl], acc_val)
+                importance += tree.new_importance_gain
 
         return importance
 

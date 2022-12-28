@@ -10,16 +10,21 @@ if not _root_logger.hasHandlers():
     _logger.addHandler(logging.StreamHandler(sys.stdout))
     _logger.propagate = False
 
-from .gpu.boosting import GradientBoosting
-from .gpu.sketch_boost import SketchBoost
-from .utils.tl_wrapper import TLPredictor, TLCompiledPredictor
+import torch
+if torch.cuda.is_available():
+    from .gpu.boosting import GradientBoosting
+    from .gpu.sketch_boost import SketchBoost
+    from .gpu.losses.losses import Loss
+    from .gpu.losses.metrics import Metric
+    from .gpu.inference import EnsembleInference
+
 from .callbacks.callback import Callback
-from .gpu.losses.losses import Loss
-from .gpu.losses.metrics import Metric
+from .utils.tl_wrapper import TLPredictor, TLCompiledPredictor
 
 __all__ = [
 
     'GradientBoosting',
+    'EnsembleInference',
     'SketchBoost',
     'TLPredictor',
     'TLCompiledPredictor',
@@ -34,9 +39,9 @@ __all__ = [
 
 ]
 
-# try:
-#     import importlib.metadata as importlib_metadata
-# except ModuleNotFoundError:
-#     import importlib_metadata
-#
-# __version__ = importlib_metadata.version(__name__)
+try:
+    import importlib.metadata as importlib_metadata
+except ModuleNotFoundError:
+    import importlib_metadata
+
+__version__ = importlib_metadata.version(__name__)

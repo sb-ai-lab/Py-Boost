@@ -63,6 +63,7 @@ class Tree:
         self.new_format_offsets = None
         self.new_out_indexes = None
         self.new_out_sizes = None
+        self.new_importance_gain = None
 
     def set_nodes(self, group, unique_nodes, new_nodes_id, best_feat, best_gain, best_split, best_nan_left):
         """Write info about new nodes
@@ -127,8 +128,15 @@ class Tree:
         Returns:
 
         """
+        if self._debug:
+            for attr in ['values', 'new_format', 'new_format_offsets', 'new_out_indexes',
+                         'new_out_sizes', 'new_importance_gain']:
+                arr = getattr(self, attr)
+                setattr(self, attr, cp.asarray(arr))
+            return
+
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
-                     'new_format', 'new_format_offsets', 'new_out_indexes', 'new_out_sizes']:
+                     'new_format', 'new_format_offsets', 'new_out_indexes', 'new_out_sizes', 'new_importance_gain']:
             arr = getattr(self, attr)
             setattr(self, attr, cp.asarray(arr))
 
@@ -138,14 +146,21 @@ class Tree:
         Returns:
 
         """
+        if self._debug:
+            for attr in ['values', 'new_format', 'new_format_offsets', 'new_out_indexes',
+                         'new_out_sizes', 'new_importance_gain']:
+                arr = getattr(self, attr)
+                setattr(self, attr, cp.asarray(arr))
+            return
+
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
-                     'new_format', 'new_format_offsets', 'new_out_indexes', 'new_out_sizes']:
+                     'new_format', 'new_format_offsets', 'new_out_indexes', 'new_out_sizes', 'new_importance_gain']:
             arr = getattr(self, attr)
             if type(arr) is not np.ndarray:
                 setattr(self, attr, arr.get())
 
-    def predict_node(self, X):
-        """Predict node id from the feature matrix X
+    def _predict_node_deprecated(self, X):
+        """(DEPRECATED) Predict node id from the feature matrix X
 
         Args:
             X: cp.ndarray of features
@@ -157,8 +172,8 @@ class Tree:
         nodes = get_tree_node(X, self.feats, self.val_splits, self.split, self.nans)
         return nodes
 
-    def predict_from_nodes(self, nodes):
-        """Predict outputs from the nodes indices
+    def _predict_from_nodes_deprecated(self, nodes):
+        """(DEPRECATED) Predict outputs from the nodes indices
 
         Args:
             nodes: cp.ndarray of predicted nodes
@@ -179,7 +194,7 @@ class Tree:
         """
         return apply_values(nodes, cp.arange(self.ngroups, dtype=cp.uint64), self.leaves)
 
-    def predict_deprecated(self, X):
+    def _predict_deprecated(self, X):
         """(DEPRECATED) Predict from the feature matrix X
 
         Args:
@@ -188,9 +203,11 @@ class Tree:
         Returns:
             cp.ndarray of predictions
         """
-        return self.predict_from_nodes(self.predict_leaf_from_nodes(self.predict_node(X)))
+        if self._debug:
+            raise Exception("Deprecated functions aren't available in debug mode (!)")
+        return self._predict_from_nodes_deprecated(self.predict_leaf_from_nodes(self._predict_node_deprecated(X)))
 
-    def predict_leaf_deprecated(self, X):
+    def _predict_leaf_deprecated(self, X):
         """(DEPRECATED) Predict leaf indices from the feature matrix X
 
         Args:
@@ -199,7 +216,9 @@ class Tree:
         Returns:
             cp.ndarray of leaves
         """
-        return self.predict_leaf_from_nodes(self.predict_node(X))
+        if self._debug:
+            raise Exception("Deprecated functions aren't available in debug mode (!)")
+        return self.predict_leaf_from_nodes(self._predict_node_deprecated(X))
 
     def predict_leaf(self, X, res, stage, stages_len):
         """Predict leaf indices from the feature matrix X
@@ -256,7 +275,8 @@ class Tree:
                                                   self.nout,
                                                   res)))
 
-    def reformat(self):
+    def reformat(self, nfeats, debug=False):
+        self._debug = debug
         """Creates new internal format of the tree for faster inference
 
         Returns:
@@ -282,7 +302,7 @@ class Tree:
             q = [(0, 0)]
             while len(q) != 0:  # BFS
                 n_old, n_new = q[0]
-                if self.nans[i][n_old] is True:
+                if self.nans[i][n_old] is False:
                     nf[4 * (gr_subtree_offsets[i] + n_new)] = float(self.feats[i][n_old] + 1)
                 else:
                     nf[4 * (gr_subtree_offsets[i] + n_new)] = float(-(self.feats[i][n_old] + 1))
@@ -320,6 +340,16 @@ class Tree:
 
         self.new_out_sizes = np.array(ns, dtype=np.int32)
         self.new_out_indexes = np.array(ni, dtype=np.int32)
+
+        # importance with gain calc
+        self.new_importance_gain = np.zeros(nfeats, dtype=np.float32)
+        sl = self.feats >= 0
+        acc_val = self.gains[sl]
+        np.add.at(self.new_importance_gain, self.feats[sl], acc_val)
+
+        if debug is True:
+            for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'group_index', 'leaves']:
+                delattr(self, attr)
 
 
 class DepthwiseTreeBuilder:
@@ -458,6 +488,6 @@ class DepthwiseTreeBuilder:
         val_preds = [apply_values(x, group_index, values) for x in val_leaves]
         tree.set_node_values(values.get(), group_index.get())
 
-        tree.reformat()
+        tree.reformat(nfeats=X.shape[1], debug=self.params['debug'])
 
         return tree, leaves, pred, val_leaves, val_preds
