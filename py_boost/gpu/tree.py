@@ -231,14 +231,17 @@ class Tree:
 
         """
 
-        tree_prediction_leaves_kernel((X.shape[0],), (self.ngroups, 1), ((X,
-                                                                          self.new_format,
-                                                                          self.new_format_offsets,
-                                                                          X.shape[1],
-                                                                          self.ngroups,
-                                                                          stages_len * self.ngroups,
-                                                                          stage,
-                                                                          res)))
+        threads = 128
+        blocks = ((X.shape[0] * self.ngroups) // threads) + 1
+        tree_prediction_leaves_kernel((blocks,), (threads,), ((X,
+                                                               self.new_format,
+                                                               self.new_format_offsets,
+                                                               X.shape[1],
+                                                               self.ngroups,
+                                                               stages_len * self.ngroups,
+                                                               stage,
+                                                               X.shape[0],
+                                                               res)))
 
     def predict(self, X, res):
         """Predict from the feature matrix X
@@ -251,29 +254,19 @@ class Tree:
 
         """
 
-        def get_optimal_cuda_params(nrows, ngroups):
-            assert ngroups <= 1024
-            if ngroups >= 512:
-                return (nrows,), (ngroups, 1)
-            nr = 512 // ngroups
-            if nrows > nr:
-                while nrows % nr > 0:
-                    nr = nr // 2
-                return (nrows // nr,), (ngroups, nr)
-            else:
-                return (nrows,), (ngroups, 1)
-
-        blocks, threads = get_optimal_cuda_params(X.shape[0], self.ngroups)
-
-        tree_prediction_kernel(blocks, threads, ((X,
-                                                  self.new_format,
-                                                  self.new_format_offsets,
-                                                  self.values,
-                                                  self.new_out_sizes,
-                                                  self.new_out_indexes,
-                                                  X.shape[1],
-                                                  self.nout,
-                                                  res)))
+        threads = 128
+        blocks = ((X.shape[0] * self.ngroups) // threads) + 1
+        tree_prediction_kernel((blocks,), (threads,), ((X,
+                                                        self.new_format,
+                                                        self.new_format_offsets,
+                                                        self.values,
+                                                        self.new_out_sizes,
+                                                        self.new_out_indexes,
+                                                        X.shape[1],
+                                                        self.nout,
+                                                        X.shape[0],
+                                                        self.ngroups,
+                                                        res)))
 
     def reformat(self, nfeats, debug=False):
         self._debug = debug
@@ -302,7 +295,7 @@ class Tree:
             q = [(0, 0)]
             while len(q) != 0:  # BFS
                 n_old, n_new = q[0]
-                if self.nans[i][n_old] is False:
+                if not self.nans[i][n_old]:
                     nf[4 * (gr_subtree_offsets[i] + n_new)] = float(self.feats[i][n_old] + 1)
                 else:
                     nf[4 * (gr_subtree_offsets[i] + n_new)] = float(-(self.feats[i][n_old] + 1))
