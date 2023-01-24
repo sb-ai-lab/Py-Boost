@@ -5,6 +5,7 @@ from .utils import tree_prediction_kernel_alltogether, pinned_array
 
 class EnsembleInference:
     """Special fast inference class generated from trained ensemble"""
+
     @staticmethod
     def _default_postprocess_fn(x):
         return x
@@ -83,30 +84,25 @@ class EnsembleInference:
         Returns:
 
         """
-        def get_optimal_cuda_params(nrows, ngroups, nmodels):
-            assert ngroups <= 1024
-            if ngroups >= 512:
-                return (nrows, nmodels), (ngroups, 1)
-            nr = 512 // ngroups
-            if nrows > nr:
-                while nrows % nr > 0:
-                    nr = nr // 2
-                return (nrows // nr, nmodels), (ngroups, nr)
-            else:
-                return (nrows, nmodels), (ngroups, 1)
 
-        blocks, threads = get_optimal_cuda_params(X.shape[0], self.n_groups, self.n_models)
+        threads = 128
+        sz = X.shape[0] * self.n_groups
+        blocks = sz // threads
+        if sz % threads != 0:
+            blocks += 1
 
-        tree_prediction_kernel_alltogether(blocks, threads, ((X,
-                                                              self.all_trees,
-                                                              self.all_tree_offsets,
-                                                              self.all_values,
-                                                              self.all_values_offset,
-                                                              self.all_out_sizes,
-                                                              self.all_out_indexes,
-                                                              self.n_feat,
-                                                              self.n_out,
-                                                              res)))
+        tree_prediction_kernel_alltogether((blocks, self.n_models), (threads,), ((X,
+                                                                                  self.all_trees,
+                                                                                  self.all_tree_offsets,
+                                                                                  self.all_values,
+                                                                                  self.all_values_offset,
+                                                                                  self.all_out_sizes,
+                                                                                  self.all_out_indexes,
+                                                                                  self.n_feat,
+                                                                                  self.n_out,
+                                                                                  X.shape[0],
+                                                                                  self.n_groups,
+                                                                                  res)))
 
     def predict(self, X, batch_size=100000):
         """Make prediction for the feature matrix X
@@ -123,6 +119,20 @@ class EnsembleInference:
         cur_dtype = np.float32
         n_streams = 2  # don't change
         map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
+
+        # special case handle if X is already on device
+        if type(X) is cp.ndarray:
+            cpu_pred = np.empty((X.shape[0], self.n_out), dtype=cur_dtype)
+            gpu_pred = cp.empty((X.shape[0], self.n_out), dtype=cur_dtype)
+
+            gpu_pred[:] = self.base_score
+
+            self._predict_kernel(X, gpu_pred)
+
+            cp.cuda.get_current_stream().synchronize()
+            self.postprocess_fn(gpu_pred).get(out=cpu_pred)
+
+            return cpu_pred
 
         # result allocation
         cpu_pred_full = np.empty((X.shape[0], self.n_out), dtype=cur_dtype)

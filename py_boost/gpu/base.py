@@ -275,20 +275,32 @@ class Ensemble:
         """
         if iterations is None:
             iterations = range(len(self.models))
+        if len(iterations) == 0:
+            return np.empty(0, dtype=np.float32)
 
         self.to_device()
 
         check_grp = np.unique([x.ngroups for x in self.models])
         if check_grp.shape[0] > 1:
             raise ValueError('Different number of groups in trees')
-
         ngroups = check_grp[0]
 
         n_streams = 2  # don't change
         map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
 
+        # special case handle if X is already on device
+        if type(X) is cp.ndarray:
+            cpu_pred = np.empty((X.shape[0], len(iterations), ngroups), dtype=np.int32)
+            gpu_pred = cp.empty((X.shape[0], len(iterations), ngroups), dtype=np.int32)
+
+            for j, n in enumerate(iterations):
+                self.models[n].predict_leaf(X, gpu_pred, j, len(iterations))
+
+            cp.cuda.get_current_stream().synchronize()
+            gpu_pred.get(out=cpu_pred)
+            return np.transpose(cpu_pred, (1, 0, 2))
+
         # result allocation
-        n_out = self.base_score.shape[0]
         cpu_leaves_full = np.empty((X.shape[0], len(iterations), ngroups), dtype=np.int32)
         cpu_leaves = [pinned_array(np.empty((batch_size, len(iterations), ngroups), dtype=np.int32)) for _ in range(n_streams)]
         gpu_leaves = [cp.empty((batch_size, len(iterations), ngroups), dtype=np.int32) for _ in range(n_streams)]
@@ -383,14 +395,36 @@ class Ensemble:
         """
         if iterations is None:
             iterations = list(range(len(self.models)))
+        if len(iterations) == 0:
+            return np.empty(0, dtype=np.float32)
 
+        # general initialization
         self.to_device()
-
         cur_dtype = np.float32
         stream = cp.cuda.Stream()
+        n_out = self.base_score.shape[0]
+
+        # special case handle if X is already on device
+        if type(X) is cp.ndarray:
+            cpu_pred = np.empty((len(iterations), X.shape[0], n_out), dtype=cur_dtype)
+            gpu_pred = cp.empty((X.shape[0], n_out), dtype=cur_dtype)
+
+            gpu_pred[:] = self.base_score
+            next_out = 0
+            for n, tree in enumerate(self.models):
+                tree.predict(X, gpu_pred)
+                if n == iterations[next_out]:
+                    stream.synchronize()
+                    self.postprocess_fn(gpu_pred).get(out=cpu_pred[next_out])
+                    stream.synchronize()
+
+                    next_out += 1
+                    if next_out >= len(iterations):
+                        break
+
+            return cpu_pred
 
         # result allocation
-        n_out = self.base_score.shape[0]
         cpu_pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=cur_dtype)
         gpu_pred = cp.empty((batch_size, n_out), dtype=cur_dtype)
 
@@ -430,14 +464,30 @@ class Ensemble:
         Returns:
             prediction, 2d np.ndarray of float32, shape (n_data, n_outputs)
         """
-        self.to_device()
 
+        # general initialization
+        self.to_device()
         cur_dtype = np.float32
+        n_out = self.base_score.shape[0]
         n_streams = 2  # don't change
         map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
 
+        # special case handle if X is already on device
+        if type(X) is cp.ndarray:
+            cpu_pred = np.empty((X.shape[0], n_out), dtype=cur_dtype)
+            gpu_pred = cp.empty((X.shape[0], n_out), dtype=cur_dtype)
+
+            gpu_pred[:] = self.base_score
+
+            for tree in self.models:
+                tree.predict(X, gpu_pred)
+
+            cp.cuda.get_current_stream().synchronize()
+            self.postprocess_fn(gpu_pred).get(out=cpu_pred)
+
+            return cpu_pred
+
         # result allocation
-        n_out = self.base_score.shape[0]
         cpu_pred_full = np.empty((X.shape[0], n_out), dtype=cur_dtype)
         cpu_pred = [pinned_array(np.empty((batch_size, n_out), dtype=cur_dtype)) for _ in range(n_streams)]
         gpu_pred = [cp.empty((batch_size, n_out), dtype=cur_dtype) for _ in range(n_streams)]

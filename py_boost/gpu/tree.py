@@ -232,7 +232,11 @@ class Tree:
         """
 
         threads = 128
-        blocks = ((X.shape[0] * self.ngroups) // threads) + 1
+        sz = X.shape[0] * self.ngroups
+        blocks = sz // threads
+        if sz % threads != 0:
+            blocks += 1
+
         tree_prediction_leaves_kernel((blocks,), (threads,), ((X,
                                                                self.new_format,
                                                                self.new_format_offsets,
@@ -255,7 +259,10 @@ class Tree:
         """
 
         threads = 128
-        blocks = ((X.shape[0] * self.ngroups) // threads) + 1
+        sz = X.shape[0] * self.ngroups
+        blocks = sz // threads
+        if sz % threads != 0:
+            blocks += 1
         tree_prediction_kernel((blocks,), (threads,), ((X,
                                                         self.new_format,
                                                         self.new_format_offsets,
