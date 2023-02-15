@@ -1,6 +1,7 @@
 import logging
 import sys
 import subprocess
+import warnings
 
 _root_logger = logging.getLogger()
 _logger = logging.getLogger(__name__)
@@ -13,14 +14,14 @@ if not _root_logger.hasHandlers():
 
 try:
     subprocess.check_output('nvidia-smi')
-    print('Nvidia GPU detected')
     from .gpu.boosting import GradientBoosting
     from .gpu.sketch_boost import SketchBoost
     from .gpu.losses.losses import Loss
     from .gpu.losses.metrics import Metric
     from .gpu.inference import EnsembleInference
 except Exception:
-    print('No Nvidia GPU in system!')
+    warnings.warn('No Nvidia GPU in system!')
+
 
 from .callbacks.callback import Callback
 from .utils.tl_wrapper import TLPredictor, TLCompiledPredictor
