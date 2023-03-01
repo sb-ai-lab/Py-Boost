@@ -759,7 +759,7 @@ tree_prediction_kernel_new2 = cp.RawKernel(
         float prev_val = res[th];
         int i_gr = indexes[i_out];
         int val_offset = leaves[i_ * n_gr + i_gr];
-        float new_val = values[val_offset + i_out]
+        float new_val = values[val_offset + i_out];
         res[th] = prev_val + new_val;
     }
     ''',

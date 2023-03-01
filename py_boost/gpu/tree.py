@@ -301,6 +301,10 @@ class Tree:
                                                         self.ngroups,
                                                         res_leaves)))
 
+        sz = X.shape[0] * self.nout
+        blocks = sz // threads
+        if sz % threads != 0:
+            blocks += 1
         tree_prediction_kernel_new2((blocks,), (threads,), ((res_leaves,
                                                         self.group_index,
                                                         self.values,
