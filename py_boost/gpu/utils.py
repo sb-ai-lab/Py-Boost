@@ -700,7 +700,7 @@ tree_prediction_kernel_new = cp.RawKernel(
         const int n_out,
         const int x_size,
         const int n_gr,
-        float* res)
+        int* res)
     {
         long long th = blockIdx.x * blockDim.x + threadIdx.x;
         long long i_ = th / n_gr;
@@ -741,8 +741,8 @@ tree_prediction_kernel_new2 = cp.RawKernel(
     r'''
     extern "C" __global__
     void tree_prediction_kernel_new2(
-        const float* leaves,
-        const float* indexes,
+        const int* leaves,
+        const int* indexes,
         const float* values,
         const int n_out,
         const int x_size,
