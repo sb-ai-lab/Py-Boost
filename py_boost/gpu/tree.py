@@ -5,6 +5,7 @@ import numpy as np
 
 from .utils import apply_values, depthwise_grow_tree, get_tree_node, set_leaf_values, calc_node_values
 from .utils import tree_prediction_kernel, tree_prediction_leaves_kernel
+from .utils import tree_prediction_kernel_new, tree_prediction_kernel_new2
 
 
 class Tree:
@@ -270,6 +271,39 @@ class Tree:
                                                         self.new_out_sizes,
                                                         self.new_out_indexes,
                                                         X.shape[1],
+                                                        self.nout,
+                                                        X.shape[0],
+                                                        self.ngroups,
+                                                        res)))
+
+    def predict_new(self, X, res, res_leaves):
+        """Predict from the feature matrix X
+
+        Args:
+            X: cp.ndarray of features
+            res: cp.ndarray buffer for predictions
+
+        Returns:
+
+        """
+
+        threads = 128
+        sz = X.shape[0] * self.ngroups
+        blocks = sz // threads
+        if sz % threads != 0:
+            blocks += 1
+        tree_prediction_kernel_new((blocks,), (threads,), ((X,
+                                                        self.new_format,
+                                                        self.new_format_offsets,
+                                                        X.shape[1],
+                                                        self.nout,
+                                                        X.shape[0],
+                                                        self.ngroups,
+                                                        res_leaves)))
+
+        tree_prediction_kernel_new2((blocks,), (threads,), ((res_leaves,
+                                                        self.group_index,
+                                                        self.values,
                                                         self.nout,
                                                         X.shape[0],
                                                         self.ngroups,

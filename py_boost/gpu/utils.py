@@ -689,6 +689,82 @@ tree_prediction_kernel = cp.RawKernel(
     ''',
     'tree_prediction_kernel')
 
+tree_prediction_kernel_new = cp.RawKernel(
+    r'''
+    extern "C" __global__
+    void tree_prediction_kernel_new(
+        const float* X,
+        const float4* tree,
+        const int* gr_subtree_offsets,
+        const int n_features,
+        const int n_out,
+        const int x_size,
+        const int n_gr,
+        float* res)
+    {
+        long long th = blockIdx.x * blockDim.x + threadIdx.x;
+        long long i_ = th / n_gr;
+        if (i_ >= x_size) {
+            return;
+        }
+        int j_ = (int)(th % n_gr);
+
+        long long x_feat_offset = n_features * i_;
+        int tree_offset = gr_subtree_offsets[j_];
+
+        int n_node = 0;
+        float4 nd;
+        float x;
+        int n_feat_raw;
+
+        // going through the tree
+        while (n_node >= 0) {
+            nd = tree[tree_offset + n_node];
+
+            n_feat_raw = (int)nd.x;
+            x = X[x_feat_offset + abs(n_feat_raw) - 1];
+
+            if (isnan(x)) {
+                n_node = (n_feat_raw > 0) ? (int)nd.w : (int)nd.z;
+            } else {
+                n_node = (x > nd.y) ? (int)nd.w : (int)nd.z;
+            }
+        }
+
+        // writing result
+        res[i_ * n_gr + j_] = (-n_node - 1) * n_out;
+    }
+    ''',
+    'tree_prediction_kernel_new')
+
+tree_prediction_kernel_new2 = cp.RawKernel(
+    r'''
+    extern "C" __global__
+    void tree_prediction_kernel_new2(
+        const float* leaves,
+        const float* indexes,
+        const float* values,
+        const int n_out,
+        const int x_size,
+        const int n_gr,
+        float* res)
+    {
+        long long th = blockIdx.x * blockDim.x + threadIdx.x;
+        long long i_ = th / n_out;
+        if (i_ >= x_size) {
+            return;
+        }
+        int i_out = (int)(th % n_out);
+        
+        float prev_val = res[th];
+        int i_gr = indexes[i_out];
+        int val_offset = leaves[i_ * n_gr + i_gr];
+        float new_val = values[val_offset + i_out]
+        res[th] = prev_val + new_val;
+    }
+    ''',
+    'tree_prediction_kernel_new2')
+
 tree_prediction_kernel_alltogether = cp.RawKernel(
     r'''
     extern "C" __global__

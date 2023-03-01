@@ -467,6 +467,12 @@ class Ensemble:
 
         # general initialization
         self.to_device()
+
+        check_grp = np.unique([x.ngroups for x in self.models])
+        if check_grp.shape[0] > 1:
+            raise ValueError('Different number of groups in trees')
+        ngroups = check_grp[0]
+
         cur_dtype = np.float32
         n_out = self.base_score.shape[0]
         n_streams = 2  # don't change
@@ -491,6 +497,8 @@ class Ensemble:
         cpu_pred_full = np.empty((X.shape[0], n_out), dtype=cur_dtype)
         cpu_pred = [pinned_array(np.empty((batch_size, n_out), dtype=cur_dtype)) for _ in range(n_streams)]
         gpu_pred = [cp.empty((batch_size, n_out), dtype=cur_dtype) for _ in range(n_streams)]
+
+        gpu_pred_leaves = [cp.empty((batch_size, ngroups), dtype=cp.int32) for _ in range(n_streams)]
 
         # batch allocation
         cpu_batch = [pinned_array(np.empty(X[0:batch_size].shape, dtype=cur_dtype)) for _ in range(n_streams)]
@@ -517,7 +525,8 @@ class Ensemble:
                 gpu_pred[nst][:] = self.base_score
 
                 for tree in self.models:
-                    tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len])
+                    # tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len])
+                    tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len], gpu_pred_leaves[nst][:real_batch_len])
 
                 if k >= 2:
                     cpu_pred_full[i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:batch_size]
