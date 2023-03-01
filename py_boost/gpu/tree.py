@@ -65,6 +65,7 @@ class Tree:
         self.new_out_indexes = None
         self.new_out_sizes = None
         self.new_importance_gain = None
+        self.new_indexes = None
 
     def set_nodes(self, group, unique_nodes, new_nodes_id, best_feat, best_gain, best_split, best_nan_left):
         """Write info about new nodes
@@ -131,13 +132,13 @@ class Tree:
         """
         if self._debug:
             for attr in ['values', 'new_format', 'new_format_offsets', 'new_out_indexes',
-                         'new_out_sizes', 'new_importance_gain']:
+                         'new_out_sizes', 'new_importance_gain', 'new_indexes']:
                 arr = getattr(self, attr)
                 setattr(self, attr, cp.asarray(arr))
             return
 
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
-                     'new_format', 'new_format_offsets', 'new_out_indexes', 'new_out_sizes', 'new_importance_gain']:
+                     'new_format', 'new_format_offsets', 'new_out_indexes', 'new_out_sizes', 'new_importance_gain', 'new_indexes']:
             arr = getattr(self, attr)
             setattr(self, attr, cp.asarray(arr))
 
@@ -149,13 +150,13 @@ class Tree:
         """
         if self._debug:
             for attr in ['values', 'new_format', 'new_format_offsets', 'new_out_indexes',
-                         'new_out_sizes', 'new_importance_gain']:
+                         'new_out_sizes', 'new_importance_gain', 'new_indexes']:
                 arr = getattr(self, attr)
                 setattr(self, attr, cp.asarray(arr))
             return
 
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
-                     'new_format', 'new_format_offsets', 'new_out_indexes', 'new_out_sizes', 'new_importance_gain']:
+                     'new_format', 'new_format_offsets', 'new_out_indexes', 'new_out_sizes', 'new_importance_gain', 'new_indexes']:
             arr = getattr(self, attr)
             if type(arr) is not np.ndarray:
                 setattr(self, attr, arr.get())
@@ -306,7 +307,7 @@ class Tree:
         if sz % threads != 0:
             blocks += 1
         tree_prediction_kernel_new2((blocks,), (threads,), ((res_leaves,
-                                                        self.group_index,
+                                                        self.new_indexes,
                                                         self.values,
                                                         self.nout,
                                                         X.shape[0],
@@ -378,6 +379,8 @@ class Tree:
 
         self.new_out_sizes = np.array(ns, dtype=np.int32)
         self.new_out_indexes = np.array(ni, dtype=np.int32)
+
+        self.new_indexes = np.array(self.group_index, dtype=np.int32)
 
         # importance with gain calc
         self.new_importance_gain = np.zeros(nfeats, dtype=np.float32)
