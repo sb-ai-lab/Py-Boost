@@ -400,6 +400,12 @@ class Ensemble:
 
         # general initialization
         self.to_device()
+
+        check_grp = np.unique([x.ngroups for x in self.models])
+        if check_grp.shape[0] > 1:
+            raise ValueError('Different number of groups in trees')
+        ngroups = check_grp[0]
+
         cur_dtype = np.float32
         stream = cp.cuda.Stream()
         n_out = self.base_score.shape[0]
@@ -409,10 +415,13 @@ class Ensemble:
             cpu_pred = np.empty((len(iterations), X.shape[0], n_out), dtype=cur_dtype)
             gpu_pred = cp.empty((X.shape[0], n_out), dtype=cur_dtype)
 
+            gpu_pred_leaves = cp.empty((X.shape[0], ngroups), dtype=cp.int32)
+
             gpu_pred[:] = self.base_score
             next_out = 0
             for n, tree in enumerate(self.models):
-                tree.predict(X, gpu_pred)
+                # tree.predict(X, gpu_pred)
+                tree.predict_new(X, gpu_pred, gpu_pred_leaves)
                 if n == iterations[next_out]:
                     stream.synchronize()
                     self.postprocess_fn(gpu_pred).get(out=cpu_pred[next_out])
@@ -428,6 +437,8 @@ class Ensemble:
         cpu_pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=cur_dtype)
         gpu_pred = cp.empty((batch_size, n_out), dtype=cur_dtype)
 
+        gpu_pred_leaves = cp.empty((batch_size, ngroups), dtype=cp.int32)
+
         # batch allocation
         cpu_batch = pinned_array(np.empty(X[0:batch_size].shape, dtype=cur_dtype))
         gpu_batch = cp.empty(X[0:batch_size].shape, dtype=cur_dtype)
@@ -442,7 +453,8 @@ class Ensemble:
 
                 next_out = 0
                 for n, tree in enumerate(self.models):
-                    tree.predict(gpu_batch[:real_batch_len], gpu_pred[:real_batch_len])
+                    # tree.predict(gpu_batch[:real_batch_len], gpu_pred[:real_batch_len])
+                    tree.predict_new(gpu_batch[:real_batch_len], gpu_pred[:real_batch_len], gpu_pred_leaves[:real_batch_len])
                     if n == iterations[next_out]:
                         stream.synchronize()
                         self.postprocess_fn(gpu_pred[:real_batch_len]).get(out=cpu_pred_full[next_out][i:i + real_batch_len])
@@ -482,11 +494,13 @@ class Ensemble:
         if type(X) is cp.ndarray:
             cpu_pred = np.empty((X.shape[0], n_out), dtype=cur_dtype)
             gpu_pred = cp.empty((X.shape[0], n_out), dtype=cur_dtype)
+            gpu_pred_leaves = cp.empty((X.shape[0], ngroups), dtype=cp.int32)
 
             gpu_pred[:] = self.base_score
 
             for tree in self.models:
-                tree.predict(X, gpu_pred)
+                # tree.predict(X, gpu_pred)
+                tree.predict_new(X, gpu_pred, gpu_pred_leaves)
 
             cp.cuda.get_current_stream().synchronize()
             self.postprocess_fn(gpu_pred).get(out=cpu_pred)
