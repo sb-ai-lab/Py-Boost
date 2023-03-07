@@ -76,6 +76,9 @@ class GradientBoosting(Ensemble):
             seed: int, random state
             verbose: int, verbosity freq
             callbacks: list of Callback, callbacks to customize training are passed here
+
+            debug: bool, if debug mode is enabled (it removes ability to use deprecated function,
+                         thus optimizing memory usage)
         """
 
         super().__init__()
@@ -110,7 +113,6 @@ class GradientBoosting(Ensemble):
             'callbacks': callbacks,
 
             'debug': debug
-
         }
 
     def _infer_params(self):
@@ -225,7 +227,9 @@ class GradientBoosting(Ensemble):
             self.models.append(tree)
             # check exit info
             if self.callbacks.after_iteration(build_info):
+                tree.reformat(nfeats=self.nfeats, debug=self.params['debug'])
                 break
+            tree.reformat(nfeats=self.nfeats, debug=self.params['debug'])
 
         self.callbacks.after_train(build_info)
         self.base_score = self.base_score.get()
@@ -302,8 +306,6 @@ class GradientBoosting(Ensemble):
                                        lambda_l2=self.lambda_l2,
                                        max_depth=self.max_depth,
                                        max_bin=max_bin,
-
-                                       debug=self.params['debug'],
                                        )
         cp.random.seed(self.seed)
 

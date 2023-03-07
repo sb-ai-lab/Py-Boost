@@ -4,14 +4,14 @@ import cupy as cp
 import numpy as np
 
 from .utils import apply_values, depthwise_grow_tree, get_tree_node, set_leaf_values, calc_node_values
-from .utils import tree_prediction_kernel, tree_prediction_leaves_kernel
-from .utils import tree_prediction_kernel_new, tree_prediction_kernel_new2
+from .utils import tree_prediction_leaves_kernel
+from .utils import tree_prediction_kernel_new1, tree_prediction_kernel_new2
 
 
 class Tree:
     """This class initializes an empty tree structure, implements methods to set tree values and single tree inference.
     The instance of this object represents the actual boosting step, but not the single tree!
-    Actual amount of trees in the instance (at each boosting step) is defined by ngroups argument. What does it mean:
+    Actual amount of trees in the instance (at each boosting step) is defined by ngroups argument. What it means:
     Assume you have 5 class classification task, so you model output size equals 5. Possible cases here:
         - Build single decision tree that outputs a vector of 5 values. In this case ngroups eq. 1
         - Build 5 decision trees, each tree predict a value for its own class (one-vs-all).
@@ -28,8 +28,8 @@ class Tree:
         split, shape (ngroups, max_nodes, 2) - node indices corresponding left/right split for the current node
 
     Trees structure defines single node id value for each object
-    Values assigned to the outpus are defined by arrays:
-        grouop_index, shape (nout, ). Defines the group id for predicting each output
+    Values assigned to the outputs are defined by arrays:
+        group_index, shape (nout, ). Defines the group id for predicting each output
         values, shape (max_nodes, nout). Define output value for each node/output
         leaves, shape (max_leaves, ngroups). Assigns the leaf index to the terminal nodes
 
@@ -60,11 +60,12 @@ class Tree:
         self.leaves = None
         self.max_leaves = None
 
-        self.new_format = None
-        self.new_format_offsets = None
-        self.new_out_indexes = None
-        self.new_out_sizes = None
-        self.new_importance_gain = None
+        self._debug = None
+        self.test_format = None
+        self.test_format_offsets = None
+        self.test_out_indexes = None
+        self.test_out_sizes = None
+        self.test_importance_gain = None
         self.new_indexes = None
 
     def set_nodes(self, group, unique_nodes, new_nodes_id, best_feat, best_gain, best_split, best_nan_left):
@@ -131,14 +132,15 @@ class Tree:
 
         """
         if self._debug:
-            for attr in ['values', 'new_format', 'new_format_offsets', 'new_out_indexes',
-                         'new_out_sizes', 'new_importance_gain', 'new_indexes']:
+            for attr in ['values', 'test_format', 'test_format_offsets', 'test_out_indexes',
+                         'test_out_sizes', 'test_importance_gain', 'new_indexes']:
                 arr = getattr(self, attr)
                 setattr(self, attr, cp.asarray(arr))
             return
 
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
-                     'new_format', 'new_format_offsets', 'new_out_indexes', 'new_out_sizes', 'new_importance_gain', 'new_indexes']:
+                     'test_format', 'test_format_offsets', 'test_out_indexes', 'test_out_sizes',
+                     'test_importance_gain', 'new_indexes']:
             arr = getattr(self, attr)
             setattr(self, attr, cp.asarray(arr))
 
@@ -149,14 +151,15 @@ class Tree:
 
         """
         if self._debug:
-            for attr in ['values', 'new_format', 'new_format_offsets', 'new_out_indexes',
-                         'new_out_sizes', 'new_importance_gain', 'new_indexes']:
+            for attr in ['values', 'test_format', 'test_format_offsets', 'test_out_indexes',
+                         'test_out_sizes', 'test_importance_gain', 'new_indexes']:
                 arr = getattr(self, attr)
                 setattr(self, attr, cp.asarray(arr))
             return
 
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
-                     'new_format', 'new_format_offsets', 'new_out_indexes', 'new_out_sizes', 'new_importance_gain', 'new_indexes']:
+                     'test_format', 'test_format_offsets', 'test_out_indexes', 'test_out_sizes',
+                     'test_importance_gain', 'new_indexes']:
             arr = getattr(self, attr)
             if type(arr) is not np.ndarray:
                 setattr(self, attr, arr.get())
@@ -228,6 +231,8 @@ class Tree:
         Args:
             X: cp.ndarray of features
             res: cp.ndarray of leaves
+            stage:
+            stages_len:
 
         Returns:
 
@@ -240,8 +245,8 @@ class Tree:
             blocks += 1
 
         tree_prediction_leaves_kernel((blocks,), (threads,), ((X,
-                                                               self.new_format,
-                                                               self.new_format_offsets,
+                                                               self.test_format,
+                                                               self.test_format_offsets,
                                                                X.shape[1],
                                                                self.ngroups,
                                                                stages_len * self.ngroups,
@@ -249,55 +254,31 @@ class Tree:
                                                                X.shape[0],
                                                                res)))
 
-    def predict(self, X, res):
+    def predict(self, X, res=None, res_leaves=None):
         """Predict from the feature matrix X
 
         Args:
             X: cp.ndarray of features
             res: cp.ndarray buffer for predictions
+            res_leaves:
 
         Returns:
 
         """
+        if res is None:
+            res = cp.empty((X.shape[0], self.nout), dtype=cp.float32)
+        if res_leaves is None:
+            res_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
 
-        threads = 128
+        threads = 128  # threads in one CUDA block
         sz = X.shape[0] * self.ngroups
         blocks = sz // threads
         if sz % threads != 0:
             blocks += 1
-        tree_prediction_kernel((blocks,), (threads,), ((X,
-                                                        self.new_format,
-                                                        self.new_format_offsets,
-                                                        self.values,
-                                                        self.new_out_sizes,
-                                                        self.new_out_indexes,
+        tree_prediction_kernel_new1((blocks,), (threads,), ((X,
+                                                        self.test_format,
+                                                        self.test_format_offsets,
                                                         X.shape[1],
-                                                        self.nout,
-                                                        X.shape[0],
-                                                        self.ngroups,
-                                                        res)))
-
-    def predict_new(self, X, res, res_leaves):
-        """Predict from the feature matrix X
-
-        Args:
-            X: cp.ndarray of features
-            res: cp.ndarray buffer for predictions
-
-        Returns:
-
-        """
-
-        threads = 128
-        sz = X.shape[0] * self.ngroups
-        blocks = sz // threads
-        if sz % threads != 0:
-            blocks += 1
-        tree_prediction_kernel_new((blocks,), (threads,), ((X,
-                                                        self.new_format,
-                                                        self.new_format_offsets,
-                                                        X.shape[1],
-                                                        self.nout,
                                                         X.shape[0],
                                                         self.ngroups,
                                                         res_leaves)))
@@ -314,7 +295,7 @@ class Tree:
                                                         self.ngroups,
                                                         res)))
 
-    def reformat(self, nfeats, debug=False):
+    def reformat(self, nfeats, debug):
         self._debug = debug
         """Creates new internal format of the tree for faster inference
 
@@ -364,8 +345,8 @@ class Tree:
                     q.append((rn, new_node_number))
                 q.pop(0)
 
-        self.new_format = nf
-        self.new_format_offsets = gr_subtree_offsets
+        self.test_format = nf
+        self.test_format_offsets = gr_subtree_offsets
 
         # new arrays for output indexing
         ns = [0]
@@ -377,16 +358,16 @@ class Tree:
                 if ind == gr_ind:
                     ni.append(en)
 
-        self.new_out_sizes = np.array(ns, dtype=np.int32)
-        self.new_out_indexes = np.array(ni, dtype=np.int32)
+        self.test_out_sizes = np.array(ns, dtype=np.int32)
+        self.test_out_indexes = np.array(ni, dtype=np.int32)
 
         self.new_indexes = np.array(self.group_index, dtype=np.int32)
 
         # importance with gain calc
-        self.new_importance_gain = np.zeros(nfeats, dtype=np.float32)
+        self.test_importance_gain = np.zeros(nfeats, dtype=np.float32)
         sl = self.feats >= 0
         acc_val = self.gains[sl]
-        np.add.at(self.new_importance_gain, self.feats[sl], acc_val)
+        np.add.at(self.test_importance_gain, self.feats[sl], acc_val)
 
         if debug is True:
             for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'group_index', 'leaves']:
@@ -425,7 +406,6 @@ class DepthwiseTreeBuilder:
             'max_depth': 6,
             'min_data_in_leaf': 10,
             'min_gain_to_split': 0
-
         }, **tree_params}
 
         self.colsampler = colsampler
@@ -441,7 +421,8 @@ class DepthwiseTreeBuilder:
             X: cp.ndarray, quantized feature matrix
             grad: cp.ndarray, gradient matrix
             hess: cp.ndarray, hessian matrix
-            sample_weight: cp.ndarray or None, sample weights
+            sample_weight: cp.ndarray or None, sample's weights
+            grad_fn: gradient fn
             *val_arrays: list of cp.ndarray, list of quantized features for validation sets
 
         Returns:
@@ -484,8 +465,7 @@ class DepthwiseTreeBuilder:
             if G.shape[1] == 1:
                 H = hess if hess.shape[1] == 1 else hess[:, grp_indexer]
             # else we can decide: should we use hess for tree structure search or
-            # assume hess eq. sample weight for all outputs
-            # and then we can use proxy for tree structure search
+            # assume hess eq. sample weight for all outputs, and then we can use proxy for tree structure search
             else:
                 if self.use_hess:
                     H = hess[:, grp_indexer]
@@ -506,7 +486,7 @@ class DepthwiseTreeBuilder:
 
         # transform nodes to leaves
         tree.set_leaves()
-        leaves_idx, max_leaves, leaves_grp = cp.asarray(tree.leaves, dtype=cp.int32), tree.max_leaves, \
+        leaves_idx, max_leaves, leaves_grp = cp.asarray(tree.leaves, dtype=cp.int32), tree.max_leaves,\
                                              cp.arange(len(output_groups), dtype=cp.uint64)
 
         leaves = apply_values(nodes_group, leaves_grp, leaves_idx)
@@ -528,7 +508,5 @@ class DepthwiseTreeBuilder:
         # transform leaves to values
         val_preds = [apply_values(x, group_index, values) for x in val_leaves]
         tree.set_node_values(values.get(), group_index.get())
-
-        tree.reformat(nfeats=X.shape[1], debug=self.params['debug'])
 
         return tree, leaves, pred, val_leaves, val_preds

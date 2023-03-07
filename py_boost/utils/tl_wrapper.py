@@ -47,18 +47,18 @@ def create_node(tree, node_id, id_gen):
 
     assert node_id >= 0
 
-    feature_id = int(tree.new_format[node_id * 4])
+    feature_id = int(tree.test_format[node_id * 4])
     nan_left = feature_id < 0
     feature_id = abs(feature_id) - 1
 
-    left = int(tree.new_format[node_id * 4 + 2])
-    right = int(tree.new_format[node_id * 4 + 3])
+    left = int(tree.test_format[node_id * 4 + 2])
+    right = int(tree.test_format[node_id * 4 + 3])
     new_id_left = next(id_gen)
     new_id_right = next(id_gen)
     node = {
         'feature_id': feature_id,
         'opname': '<=',
-        'threshold': tree.new_format[node_id * 4 + 1],
+        'threshold': tree.test_format[node_id * 4 + 1],
         'default_left': nan_left,
         'left_child_key': new_id_left,
         'right_child_key': new_id_right,

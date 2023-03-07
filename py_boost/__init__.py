@@ -18,7 +18,6 @@ try:
     from .gpu.sketch_boost import SketchBoost
     from .gpu.losses.losses import Loss
     from .gpu.losses.metrics import Metric
-    from .gpu.inference import EnsembleInference
 except Exception:
     warnings.warn('No Nvidia GPU in system!')
 

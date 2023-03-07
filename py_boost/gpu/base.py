@@ -152,7 +152,13 @@ class Ensemble:
             For n_groups explanation check Tree class
         """
         if iterations is None:
-            iterations = range(len(self.models))
+            iterations = list(range(len(self.models)))
+        if len(iterations) == 0:
+            return np.empty(0, dtype=np.float32)
+        if min(iterations) < 0 or max(iterations) >= len(self.models):
+            raise Exception("Invalid stage numbers")
+        if all(isinstance(el, int) for el in iterations) is False:
+            raise Exception("Stage numbers must be int type")
 
         self.to_device()
 
@@ -198,8 +204,16 @@ class Ensemble:
         Returns:
             prediction, 2d np.ndarray of float32, shape (n_iterations, n_data, n_out)
         """
+
+        # Iteration list validation
         if iterations is None:
             iterations = list(range(len(self.models)))
+        if len(iterations) == 0:
+            return np.empty(0, dtype=np.float32)
+        if min(iterations) < 0 or max(iterations) >= len(self.models):
+            raise Exception("Invalid stage numbers")
+        if all(isinstance(el, int) for el in iterations) is False:
+            raise Exception("Stage numbers must be int type")
 
         self.to_device()
         prediction = pinned_array(np.empty((len(iterations), X.shape[0], self.base_score.shape[0]), dtype=np.float32))
@@ -274,9 +288,13 @@ class Ensemble:
             For n_groups explanation check Tree class
         """
         if iterations is None:
-            iterations = range(len(self.models))
+            iterations = list(range(len(self.models)))
         if len(iterations) == 0:
             return np.empty(0, dtype=np.float32)
+        if min(iterations) < 0 or max(iterations) >= len(self.models):
+            raise Exception("Invalid stage numbers")
+        if all(isinstance(el, int) for el in iterations) is False:
+            raise Exception("Stage numbers must be int type")
 
         self.to_device()
 
@@ -374,10 +392,10 @@ class Ensemble:
 
         for tree in self.models:
             if imp_type == 'split':
-                feats = abs(tree.new_format[::4].copy()).astype(int) - 1
+                feats = abs(tree.test_format[::4].copy()).astype(int) - 1
                 np.add.at(importance, feats, 1)
             else:
-                importance += tree.new_importance_gain
+                importance += tree.test_importance_gain
 
         return importance
 
@@ -387,16 +405,22 @@ class Ensemble:
         Args:
             X: 2d np.ndarray of features
             iterations: list of int or None. If list of ints is passed, prediction will be made only
+            iterations: list of int or None. If list of ints is passed, prediction will be made only
             for given iterations, otherwise - for all iterations
             batch_size: int, inner batch splitting size to avoid OOM
 
         Returns:
             prediction, 2d np.ndarray of float32, shape (n_iterations, n_data, n_out)
         """
+        # Iteration list validation
         if iterations is None:
             iterations = list(range(len(self.models)))
         if len(iterations) == 0:
             return np.empty(0, dtype=np.float32)
+        if min(iterations) < 0 or max(iterations) >= len(self.models):
+            raise Exception("Invalid stage numbers")
+        if all(isinstance(el, int) for el in iterations) is False:
+            raise Exception("Stage numbers must be int type")
 
         # general initialization
         self.to_device()
@@ -540,7 +564,8 @@ class Ensemble:
 
                 for tree in self.models:
                     # tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len])
-                    tree.predict_new(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len], gpu_pred_leaves[nst][:real_batch_len])
+                    tree.predict_new(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len],
+                                     gpu_pred_leaves[nst][:real_batch_len])
 
                 if k >= 2:
                     cpu_pred_full[i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:batch_size]
