@@ -254,6 +254,33 @@ class Tree:
                                                                X.shape[0],
                                                                res)))
 
+    def predict_leaf_new(self, X, res=None):
+        """Predict from the feature matrix X
+
+        Args:
+            X: cp.ndarray of features
+            res: cp.ndarray buffer for predictions
+            res_leaves:
+
+        Returns:
+
+        """
+        if res is None:
+            res = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
+
+        threads = 128  # threads in one CUDA block
+        sz = X.shape[0] * self.ngroups
+        blocks = sz // threads
+        if sz % threads != 0:
+            blocks += 1
+        tree_prediction_kernel_new1((blocks,), (threads,), ((X,
+                                                        self.test_format,
+                                                        self.test_format_offsets,
+                                                        X.shape[1],
+                                                        X.shape[0],
+                                                        self.ngroups,
+                                                        res)))
+
     def predict(self, X, res=None, res_leaves=None):
         """Predict from the feature matrix X
 
