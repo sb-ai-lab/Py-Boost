@@ -583,60 +583,11 @@ node_index_kernel = cp.ElementwiseKernel(
 
     'node_index_kernel')
 
+
 tree_prediction_leaves_kernel = cp.RawKernel(
     r'''
     extern "C" __global__
     void tree_prediction_leaves_kernel(
-        const float* X,
-        const float4* tree,
-        const int* gr_subtree_offsets,
-        const int n_features,
-        const int n_gr,
-        const int n_out,
-        const int stage,
-        const int x_size,
-        int* res)
-    {
-        long long th = blockIdx.x * blockDim.x + threadIdx.x;
-        long long i_ = th / n_gr;
-        if (i_ >= x_size) {
-            return;
-        }
-        int j_ = (int)(th % n_gr);
-
-        long long x_feat_offset = n_features * i_;
-        int tree_offset = gr_subtree_offsets[j_];
-
-        int n_node = 0;
-        float4 nd;
-        float x;
-        int n_feat_raw;
-
-        // going through the tree
-        while (n_node >= 0) {
-            nd = tree[tree_offset + n_node];
-
-            n_feat_raw = (int)nd.x;
-            x = X[x_feat_offset + abs(n_feat_raw) - 1];
-
-            if (isnan(x)) {
-                n_node = (n_feat_raw > 0) ? (int)nd.w : (int)nd.z;
-            } else {
-                n_node = (x > nd.y) ? (int)nd.w : (int)nd.z;
-            }
-        }
-
-        // writing result
-        res[i_ * n_out + stage * n_gr + j_] = (-n_node - 1);
-    }
-    ''',
-    'tree_prediction_leaves_kernel')
-
-
-tree_prediction_kernel_new1 = cp.RawKernel(
-    r'''
-    extern "C" __global__
-    void tree_prediction_kernel_new1(
         const float* X,
         const float4* tree,
         const int* gr_subtree_offsets,
@@ -678,12 +629,12 @@ tree_prediction_kernel_new1 = cp.RawKernel(
         res[i_ * n_gr + j_] = (-n_node - 1);
     }
     ''',
-    'tree_prediction_kernel_new1')
+    'tree_prediction_leaves_kernel')
 
-tree_prediction_kernel_new2 = cp.RawKernel(
+tree_prediction_values_kernel = cp.RawKernel(
     r'''
     extern "C" __global__
-    void tree_prediction_kernel_new2(
+    void tree_prediction_values_kernel(
         const int* leaves,
         const int* indexes,
         const float* values,
@@ -706,7 +657,7 @@ tree_prediction_kernel_new2 = cp.RawKernel(
         res[th] = prev_val + new_val;
     }
     ''',
-    'tree_prediction_kernel_new2')
+    'tree_prediction_values_kernel')
 
 
 def get_tree_node(arr, feats, val_splits, split, nan_left):

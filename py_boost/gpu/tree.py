@@ -4,8 +4,7 @@ import cupy as cp
 import numpy as np
 
 from .utils import apply_values, depthwise_grow_tree, get_tree_node, set_leaf_values, calc_node_values
-from .utils import tree_prediction_leaves_kernel
-from .utils import tree_prediction_kernel_new1, tree_prediction_kernel_new2
+from .utils import tree_prediction_leaves_kernel, tree_prediction_values_kernel
 
 
 class Tree:
@@ -63,10 +62,8 @@ class Tree:
         self._debug = None
         self.test_format = None
         self.test_format_offsets = None
-        self.test_out_indexes = None
-        self.test_out_sizes = None
         self.test_importance_gain = None
-        self.new_indexes = None
+        self.test_indexes = None
 
     def set_nodes(self, group, unique_nodes, new_nodes_id, best_feat, best_gain, best_split, best_nan_left):
         """Write info about new nodes
@@ -132,15 +129,13 @@ class Tree:
 
         """
         if self._debug:
-            for attr in ['values', 'test_format', 'test_format_offsets', 'test_out_indexes',
-                         'test_out_sizes', 'test_importance_gain', 'new_indexes']:
+            for attr in ['values', 'test_format', 'test_format_offsets', 'test_importance_gain', 'test_indexes']:
                 arr = getattr(self, attr)
                 setattr(self, attr, cp.asarray(arr))
             return
 
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
-                     'test_format', 'test_format_offsets', 'test_out_indexes', 'test_out_sizes',
-                     'test_importance_gain', 'new_indexes']:
+                     'test_format', 'test_format_offsets', 'test_importance_gain', 'test_indexes']:
             arr = getattr(self, attr)
             setattr(self, attr, cp.asarray(arr))
 
@@ -151,15 +146,13 @@ class Tree:
 
         """
         if self._debug:
-            for attr in ['values', 'test_format', 'test_format_offsets', 'test_out_indexes',
-                         'test_out_sizes', 'test_importance_gain', 'new_indexes']:
+            for attr in ['values', 'test_format', 'test_format_offsets', 'test_importance_gain', 'test_indexes']:
                 arr = getattr(self, attr)
                 setattr(self, attr, cp.asarray(arr))
             return
 
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
-                     'test_format', 'test_format_offsets', 'test_out_indexes', 'test_out_sizes',
-                     'test_importance_gain', 'new_indexes']:
+                     'test_format', 'test_format_offsets', 'test_importance_gain', 'test_indexes']:
             arr = getattr(self, attr)
             if type(arr) is not np.ndarray:
                 setattr(self, attr, arr.get())
@@ -225,102 +218,66 @@ class Tree:
             raise Exception("Deprecated functions aren't available in debug mode (!)")
         return self.predict_leaf_from_nodes(self._predict_node_deprecated(X))
 
-    def predict_leaf(self, X, res, stage, stages_len):
-        """Predict leaf indices from the feature matrix X
+    def predict_leaf(self, X, pred_leaves=None):
+        """Predict from the feature matrix X
 
         Args:
             X: cp.ndarray of features
-            res: cp.ndarray of leaves
-            stage:
-            stages_len:
+            pred_leaves: cp.ndarray buffer for predictions
 
         Returns:
+            pred_leaves:
 
         """
+        if pred_leaves is None:
+            pred_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
 
-        threads = 128
+        threads = 128  # threads in one CUDA block
         sz = X.shape[0] * self.ngroups
         blocks = sz // threads
         if sz % threads != 0:
             blocks += 1
-
         tree_prediction_leaves_kernel((blocks,), (threads,), ((X,
                                                                self.test_format,
                                                                self.test_format_offsets,
                                                                X.shape[1],
-                                                               self.ngroups,
-                                                               stages_len * self.ngroups,
-                                                               stage,
                                                                X.shape[0],
-                                                               res)))
+                                                               self.ngroups,
+                                                               pred_leaves)))
+        return pred_leaves
 
-    def predict_leaf_new(self, X, res=None):
+    def predict(self, X, pred=None, pred_leaves=None):
         """Predict from the feature matrix X
 
         Args:
             X: cp.ndarray of features
-            res: cp.ndarray buffer for predictions
-            res_leaves:
+            pred: cp.ndarray buffer for predictions
+            pred_leaves:
 
         Returns:
+            pred:
 
         """
-        if res is None:
-            res = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
+        if pred is None:
+            pred = cp.empty((X.shape[0], self.nout), dtype=cp.float32)
+        if pred_leaves is None:
+            pred_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
+
+        self.predict_leaf(X, pred_leaves)
 
         threads = 128  # threads in one CUDA block
-        sz = X.shape[0] * self.ngroups
-        blocks = sz // threads
-        if sz % threads != 0:
-            blocks += 1
-        tree_prediction_kernel_new1((blocks,), (threads,), ((X,
-                                                        self.test_format,
-                                                        self.test_format_offsets,
-                                                        X.shape[1],
-                                                        X.shape[0],
-                                                        self.ngroups,
-                                                        res)))
-
-    def predict(self, X, res=None, res_leaves=None):
-        """Predict from the feature matrix X
-
-        Args:
-            X: cp.ndarray of features
-            res: cp.ndarray buffer for predictions
-            res_leaves:
-
-        Returns:
-
-        """
-        if res is None:
-            res = cp.empty((X.shape[0], self.nout), dtype=cp.float32)
-        if res_leaves is None:
-            res_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
-
-        threads = 128  # threads in one CUDA block
-        sz = X.shape[0] * self.ngroups
-        blocks = sz // threads
-        if sz % threads != 0:
-            blocks += 1
-        tree_prediction_kernel_new1((blocks,), (threads,), ((X,
-                                                        self.test_format,
-                                                        self.test_format_offsets,
-                                                        X.shape[1],
-                                                        X.shape[0],
-                                                        self.ngroups,
-                                                        res_leaves)))
-
         sz = X.shape[0] * self.nout
         blocks = sz // threads
         if sz % threads != 0:
             blocks += 1
-        tree_prediction_kernel_new2((blocks,), (threads,), ((res_leaves,
-                                                        self.new_indexes,
-                                                        self.values,
-                                                        self.nout,
-                                                        X.shape[0],
-                                                        self.ngroups,
-                                                        res)))
+        tree_prediction_values_kernel((blocks,), (threads,), ((pred_leaves,
+                                                               self.test_indexes,
+                                                               self.values,
+                                                               self.nout,
+                                                               X.shape[0],
+                                                               self.ngroups,
+                                                               pred)))
+        return pred
 
     def reformat(self, nfeats, debug):
         self._debug = debug
@@ -375,20 +332,7 @@ class Tree:
         self.test_format = nf
         self.test_format_offsets = gr_subtree_offsets
 
-        # new arrays for output indexing
-        ns = [0]
-        ni = []
-        gri = np.array(self.group_index, dtype=np.int32)
-        for gr_ind in range(self.ngroups):
-            ns.append((gri == gr_ind).sum() + ns[-1])
-            for en, ind in enumerate(self.group_index):
-                if ind == gr_ind:
-                    ni.append(en)
-
-        self.test_out_sizes = np.array(ns, dtype=np.int32)
-        self.test_out_indexes = np.array(ni, dtype=np.int32)
-
-        self.new_indexes = np.array(self.group_index, dtype=np.int32)
+        self.test_indexes = np.array(self.group_index, dtype=np.int32)
 
         # importance with gain calc
         self.test_importance_gain = np.zeros(nfeats, dtype=np.float32)
@@ -513,7 +457,7 @@ class DepthwiseTreeBuilder:
 
         # transform nodes to leaves
         tree.set_leaves()
-        leaves_idx, max_leaves, leaves_grp = cp.asarray(tree.leaves, dtype=cp.int32), tree.max_leaves,\
+        leaves_idx, max_leaves, leaves_grp = cp.asarray(tree.leaves, dtype=cp.int32), tree.max_leaves, \
                                              cp.arange(len(output_groups), dtype=cp.uint64)
 
         leaves = apply_values(nodes_group, leaves_grp, leaves_idx)
