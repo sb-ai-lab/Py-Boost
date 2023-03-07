@@ -274,7 +274,7 @@ class Ensemble:
 
         return importance
 
-    def predict_leaves(self, X, iterations=None, batch_size=100000):
+    def predict_leaves(self, X, iterations=None, batch_size=100_000):
         """Predict tree leaf indices for the feature matrix X
 
         Args:
@@ -401,7 +401,7 @@ class Ensemble:
 
         return importance
 
-    def predict_staged(self, X, iterations=None, batch_size=100000):
+    def predict_staged(self, X, iterations=None, batch_size=100_000):
         """Make prediction from different stages for the feature matrix X
 
         Args:
@@ -490,11 +490,11 @@ class Ensemble:
 
         return cpu_pred_full
 
-    def predict(self, X, batch_size=100000):
+    def predict(self, X, batch_size=100_000):
         """Make prediction for the feature matrix X
 
         Args:
-            X: 2d np.ndarray of features
+            X: np.ndarray, 2d array of features
             batch_size: int, inner batch splitting size to avoid OOM
 
         Returns:

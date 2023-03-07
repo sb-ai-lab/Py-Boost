@@ -77,7 +77,7 @@ class GradientBoosting(Ensemble):
             verbose: int, verbosity freq
             callbacks: list of Callback, callbacks to customize training are passed here
 
-            debug: bool, if debug mode is enabled (it removes ability to use deprecated function,
+            debug: bool, if debug mode is enabled (it removes ability to use deprecated functions,
                          thus optimizing memory usage)
         """
 
