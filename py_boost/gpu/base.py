@@ -274,17 +274,45 @@ class Ensemble:
 
         return importance
 
+    def get_feature_importance(self, imp_type='split'):
+        """Get feature importance
+
+        Args:
+            imp_type: str, importance type, 'split' or 'gain'
+
+        Returns:
+            importance: np.ndarray 1d of float32, shape (n_features)
+        """
+
+        assert imp_type in ['gain', 'split'], "Importance type should be 'gain' or 'split'"
+        importance = np.zeros(self.nfeats, dtype=np.float32)
+
+        for tree in self.models:
+            if imp_type == 'split':
+                if type(tree.test_importance_gain) is not np.ndarray:
+                    feats = abs(tree.test_format.get()[::4]).astype(int) - 1
+                else:
+                    feats = abs(tree.test_format[::4].copy()).astype(int) - 1
+                np.add.at(importance, feats, 1)
+            else:
+                if type(tree.test_importance_gain) is not np.ndarray:
+                    importance += tree.test_importance_gain.get()
+                else:
+                    importance += tree.test_importance_gain
+
+        return importance
+
     def predict_leaves(self, X, iterations=None, batch_size=100_000):
         """Predict tree leaf indices for the feature matrix X
 
         Args:
-            X: 2d np.ndarray of features
+            X: 2d np.ndarray of float32, array of features
             iterations: list of int or None. If list of ints is passed, prediction will be made only
-            for given iterations, otherwise - for all iterations
+                for given iterations, otherwise - for all iterations
             batch_size: int, inner batch splitting size to avoid OOM
 
         Returns:
-            prediction, 2d np.ndarray of uint32, shape (n_iterations, n_data, n_groups).
+            prediction, np.ndarray 2d of int32, shape (n_iterations, n_data, n_groups).
             For n_groups explanation check Tree class
         """
         if iterations is None:
@@ -370,7 +398,8 @@ class Ensemble:
             with map_streams[1 - last_n_stream] as stream:
                 stream.synchronize()
                 for j, n in enumerate(iterations):
-                    cpu_leaves_full[j][X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = cpu_leaves[1 - last_n_stream][j][:batch_size]
+                    cpu_leaves_full[j][X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = \
+                        cpu_leaves[1 - last_n_stream][j][:batch_size]
             with map_streams[last_n_stream] as stream:
                 stream.synchronize()
                 for j, n in enumerate(iterations):
@@ -378,41 +407,17 @@ class Ensemble:
 
         return cpu_leaves_full
 
-    def get_feature_importance(self, imp_type='split'):
-        """Get feature importance
-
-        Args:
-            imp_type: str, importance type, 'split' or 'gain'
-
-        Returns:
-            importance: 1d np.ndarray of float32, shape (n_features)
-        """
-        self.to_cpu()
-
-        assert imp_type in ['gain', 'split'], "Importance type should be 'gain' or 'split'"
-        importance = np.zeros(self.nfeats, dtype=np.float32)
-
-        for tree in self.models:
-            if imp_type == 'split':
-                feats = abs(tree.test_format[::4].copy()).astype(int) - 1
-                np.add.at(importance, feats, 1)
-            else:
-                importance += tree.test_importance_gain
-
-        return importance
-
     def predict_staged(self, X, iterations=None, batch_size=100_000):
         """Make prediction from different stages for the feature matrix X
 
         Args:
-            X: 2d np.ndarray of features
+            X: 2d np.ndarray of float32, array of features
             iterations: list of int or None. If list of ints is passed, prediction will be made only
-            iterations: list of int or None. If list of ints is passed, prediction will be made only
-            for given iterations, otherwise - for all iterations
+                for given iterations, otherwise - for all iterations
             batch_size: int, inner batch splitting size to avoid OOM
 
         Returns:
-            prediction, 2d np.ndarray of float32, shape (n_iterations, n_data, n_out)
+            prediction, np.ndarray 2d of float32, shape (n_iterations, n_data, n_out)
         """
         # Iteration list validation
         if iterations is None:
@@ -440,7 +445,6 @@ class Ensemble:
         if type(X) is cp.ndarray:
             cpu_pred = np.empty((len(iterations), X.shape[0], n_out), dtype=cur_dtype)
             gpu_pred = cp.empty((X.shape[0], n_out), dtype=cur_dtype)
-
             gpu_pred_leaves = cp.empty((X.shape[0], ngroups), dtype=cp.int32)
 
             gpu_pred[:] = self.base_score
@@ -462,6 +466,7 @@ class Ensemble:
         cpu_pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=cur_dtype)
         gpu_pred = cp.empty((batch_size, n_out), dtype=cur_dtype)
 
+        # temp buffer for leaves
         gpu_pred_leaves = cp.empty((batch_size, ngroups), dtype=cp.int32)
 
         # batch allocation
@@ -494,13 +499,12 @@ class Ensemble:
         """Make prediction for the feature matrix X
 
         Args:
-            X: np.ndarray, 2d array of features
+            X: np.ndarray 2d of float32, array of features
             batch_size: int, inner batch splitting size to avoid OOM
 
         Returns:
-            prediction, 2d np.ndarray of float32, shape (n_data, n_outputs)
+            prediction: np.ndarray 2d of float32, shape (n_data, n_outputs)
         """
-
         # general initialization
         self.to_device()
 
@@ -514,7 +518,7 @@ class Ensemble:
         n_streams = 2  # don't change
         map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
 
-        # special case handle if X is already on device
+        # special case handle, if X is already on device
         if type(X) is cp.ndarray:
             cpu_pred = np.empty((X.shape[0], n_out), dtype=cur_dtype)
             gpu_pred = cp.empty((X.shape[0], n_out), dtype=cur_dtype)
@@ -535,6 +539,7 @@ class Ensemble:
         cpu_pred = [pinned_array(np.empty((batch_size, n_out), dtype=cur_dtype)) for _ in range(n_streams)]
         gpu_pred = [cp.empty((batch_size, n_out), dtype=cur_dtype) for _ in range(n_streams)]
 
+        # temp buffer for leaves
         gpu_pred_leaves = [cp.empty((batch_size, ngroups), dtype=cp.int32) for _ in range(n_streams)]
 
         # batch allocation
@@ -563,7 +568,7 @@ class Ensemble:
 
                 for tree in self.models:
                     tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len],
-                                     gpu_pred_leaves[nst][:real_batch_len])
+                                 gpu_pred_leaves[nst][:real_batch_len])
 
                 if k >= 2:
                     cpu_pred_full[i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:batch_size]
