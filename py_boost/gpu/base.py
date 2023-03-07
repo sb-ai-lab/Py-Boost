@@ -444,8 +444,7 @@ class Ensemble:
             gpu_pred[:] = self.base_score
             next_out = 0
             for n, tree in enumerate(self.models):
-                # tree.predict(X, gpu_pred)
-                tree.predict_new(X, gpu_pred, gpu_pred_leaves)
+                tree.predict(X, gpu_pred, gpu_pred_leaves)
                 if n == iterations[next_out]:
                     stream.synchronize()
                     self.postprocess_fn(gpu_pred).get(out=cpu_pred[next_out])
@@ -477,8 +476,7 @@ class Ensemble:
 
                 next_out = 0
                 for n, tree in enumerate(self.models):
-                    # tree.predict(gpu_batch[:real_batch_len], gpu_pred[:real_batch_len])
-                    tree.predict_new(gpu_batch[:real_batch_len], gpu_pred[:real_batch_len], gpu_pred_leaves[:real_batch_len])
+                    tree.predict(gpu_batch[:real_batch_len], gpu_pred[:real_batch_len], gpu_pred_leaves[:real_batch_len])
                     if n == iterations[next_out]:
                         stream.synchronize()
                         self.postprocess_fn(gpu_pred[:real_batch_len]).get(out=cpu_pred_full[next_out][i:i + real_batch_len])
@@ -523,8 +521,7 @@ class Ensemble:
             gpu_pred[:] = self.base_score
 
             for tree in self.models:
-                # tree.predict(X, gpu_pred)
-                tree.predict_new(X, gpu_pred, gpu_pred_leaves)
+                tree.predict(X, gpu_pred, gpu_pred_leaves)
 
             cp.cuda.get_current_stream().synchronize()
             self.postprocess_fn(gpu_pred).get(out=cpu_pred)
@@ -563,8 +560,7 @@ class Ensemble:
                 gpu_pred[nst][:] = self.base_score
 
                 for tree in self.models:
-                    # tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len])
-                    tree.predict_new(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len],
+                    tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len],
                                      gpu_pred_leaves[nst][:real_batch_len])
 
                 if k >= 2:
