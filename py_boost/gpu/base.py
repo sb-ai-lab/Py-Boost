@@ -419,7 +419,7 @@ class Ensemble:
 
             cp.cuda.get_current_stream().synchronize()
             gpu_pred.get(out=cpu_pred)
-            return np.transpose(cpu_pred, (1, 0, 2))
+            return cpu_pred
 
         # result allocation
         cpu_leaves_full = np.empty((len(iterations), X.shape[0], ngroups), dtype=np.int32)
@@ -454,9 +454,10 @@ class Ensemble:
                     self.models[n].predict_leaf_new(gpu_batch[nst][:real_batch_len], gpu_leaves[nst][j][:real_batch_len])
 
                 if k >= 2:
-                    cpu_leaves_full[i - 2 * batch_size: i - batch_size] = cpu_leaves[nst][:batch_size]
+                    for j, n in enumerate(iterations):
+                        cpu_leaves_full[j][i - 2 * batch_size: i - batch_size] = cpu_leaves[nst][j][:batch_size]
 
-                gpu_leaves[nst][:real_batch_len].get(out=cpu_leaves[nst][:real_batch_len])
+                gpu_leaves[nst][:, :real_batch_len].get(out=cpu_leaves[nst][:, :real_batch_len])
                 cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
 
                 last_batch_size = real_batch_len
@@ -466,15 +467,20 @@ class Ensemble:
         if int(np.floor(X.shape[0] / batch_size)) == 0:  # only one stream was used
             with map_streams[last_n_stream] as stream:
                 stream.synchronize()
-                cpu_leaves_full[:last_batch_size] = cpu_leaves[last_n_stream][:last_batch_size]
+                #cpu_leaves_full[:last_batch_size] = cpu_leaves[last_n_stream][:last_batch_size]
+                for j, n in enumerate(iterations):
+                    cpu_leaves_full[j][:last_batch_size] = cpu_leaves[last_n_stream][j][:last_batch_size]
         else:
             with map_streams[1 - last_n_stream] as stream:
                 stream.synchronize()
-                cpu_leaves_full[X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = \
-                    cpu_leaves[1 - last_n_stream][:batch_size]
+                #cpu_leaves_full[X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = cpu_leaves[1 - last_n_stream][:batch_size]
+                for j, n in enumerate(iterations):
+                    cpu_leaves_full[j][X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = cpu_leaves[1 - last_n_stream][j][:batch_size]
             with map_streams[last_n_stream] as stream:
                 stream.synchronize()
-                cpu_leaves_full[X.shape[0] - last_batch_size:] = cpu_leaves[last_n_stream][:last_batch_size]
+                #cpu_leaves_full[X.shape[0] - last_batch_size:] = cpu_leaves[last_n_stream][:last_batch_size]
+                for j, n in enumerate(iterations):
+                    cpu_leaves_full[j][X.shape[0] - last_batch_size:] = cpu_leaves[last_n_stream][j][:last_batch_size]
 
         return cpu_leaves_full
 
