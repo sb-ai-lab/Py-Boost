@@ -457,7 +457,7 @@ class Ensemble:
                     for j, n in enumerate(iterations):
                         cpu_leaves_full[j][i - 2 * batch_size: i - batch_size] = cpu_leaves[nst][j][:batch_size]
 
-                gpu_leaves[nst][:, :real_batch_len].get(out=cpu_leaves[nst][:, :real_batch_len])
+                gpu_leaves[nst].get(out=cpu_leaves[nst])
                 cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
 
                 last_batch_size = real_batch_len
