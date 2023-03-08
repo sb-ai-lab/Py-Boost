@@ -407,7 +407,122 @@ class Ensemble:
 
         return cpu_leaves_full
 
-    def predict_staged(self, X, iterations=None, batch_size=100_000):
+    def predict_staged_bruh(self, X, iterations=None, batch_size=100_000):
+        """Make prediction from different stages for the feature matrix X
+
+        Args:
+            X: 2d np.ndarray of float32, array of features
+            iterations: list of int or None. If list of ints is passed, prediction will be made only
+                for given iterations, otherwise - for all iterations
+            batch_size: int, inner batch splitting size to avoid OOM
+
+        Returns:
+            prediction, np.ndarray 2d of float32, shape (n_iterations, n_data, n_out)
+        """
+        # Iteration list validation
+        if iterations is None:
+            iterations = list(range(len(self.models)))
+        if len(iterations) == 0:
+            return np.empty(0, dtype=np.float32)
+        if min(iterations) < 0 or max(iterations) >= len(self.models):
+            raise Exception("Invalid stage numbers")
+        if all(isinstance(el, int) for el in iterations) is False:
+            raise Exception("Stage numbers must be int type")
+        if sorted(iterations) != iterations:
+            raise Exception("Stages in iterations list should be sorted in ascending order beforehand")
+
+        # general initialization
+        self.to_device()
+
+        check_grp = np.unique([x.ngroups for x in self.models])
+        if check_grp.shape[0] > 1:
+            raise ValueError('Different number of groups in trees')
+        n_groups = check_grp[0]
+        n_out = self.base_score.shape[0]
+
+        # special case handle if X is already on device
+        if type(X) is cp.ndarray:
+            cpu_pred = np.empty((len(iterations), X.shape[0], n_out), dtype=np.float32)
+            gpu_pred = cp.empty((X.shape[0], n_out), dtype=np.float32)
+            gpu_pred_leaves = cp.empty((X.shape[0], n_groups), dtype=np.int32)
+
+            gpu_pred[:] = self.base_score
+            next_out = 0
+            for n, tree in enumerate(self.models):
+                tree.predict(X, gpu_pred, gpu_pred_leaves)
+                if n == iterations[next_out]:
+                    cp.cuda.get_current_stream().synchronize()
+                    self.postprocess_fn(gpu_pred).get(out=cpu_pred[next_out])
+                    cp.cuda.get_current_stream().synchronize()
+
+                    next_out += 1
+                    if next_out >= len(iterations):
+                        break
+
+            return cpu_pred
+
+        n_streams = 2  # don't change
+        map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
+
+        # result allocation
+        cpu_pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=np.int32)
+        cpu_pred = [pinned_array(np.empty((len(iterations), batch_size, n_out), dtype=np.int32)) for _ in range(n_streams)]
+        gpu_pred = [cp.empty((len(iterations), batch_size, n_out), dtype=np.int32) for _ in range(n_streams)]
+
+        # temp buffer for leaves
+        gpu_pred_leaves = [cp.empty((batch_size, n_groups), dtype=cp.int32) for _ in range(n_streams)]
+
+        # batch allocation
+        cpu_batch = [pinned_array(np.empty(X[0:batch_size].shape, dtype=np.float32)) for _ in range(n_streams)]
+        gpu_batch = [cp.empty(X[0:batch_size].shape, dtype=np.float32) for _ in range(n_streams)]
+
+        cpu_batch_free_event = [None, None]
+        cpu_out_ready_event = [None, None]
+        last_batch_size = 0
+        last_n_stream = 0
+        for k, i in enumerate(range(0, X.shape[0], batch_size * 2)):
+            real_batch_len = batch_size * 2 if i + 2 * batch_size <= X.shape[0] else X.shape[0] - i
+            if real_batch_len <= batch_size:
+                batch0 = real_batch_len
+                batch1 = None
+            else:
+                batch0 = batch_size
+                batch1 = real_batch_len - batch_size
+            gpu_pred[0][:] = self.base_score
+            gpu_pred[1][:] = self.base_score
+            i_tree = 0
+            for it in iterations:
+                nst = 0
+                with map_streams[nst] as stream:
+                    cpu_batch[nst][:real_batch_len] = X[i:i + real_batch_len].astype(np.float32)
+                    gpu_batch[nst][:real_batch_len].set(cpu_batch[nst][:real_batch_len])
+
+                    while i_tree <= it:
+                        self.models[i_tree].predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len],
+                                                    gpu_pred_leaves[nst][:real_batch_len])
+                        i_tree += 1
+
+                    self.postprocess_fn(gpu_pred[nst][:real_batch_len]).get(out=cpu_pred[nst][:real_batch_len])
+
+                    cpu_pred_full[i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:batch_size]
+
+            # waiting for sync of last two batches
+            if int(np.floor(X.shape[0] / batch_size)) == 0:  # only one stream was used
+                with map_streams[last_n_stream] as stream:
+                    stream.synchronize()
+                    cpu_pred_full[:last_batch_size] = cpu_pred[last_n_stream][:last_batch_size]
+            else:
+                with map_streams[1 - last_n_stream] as stream:
+                    stream.synchronize()
+                    cpu_pred_full[X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = \
+                        cpu_pred[1 - last_n_stream][:batch_size]
+                with map_streams[last_n_stream] as stream:
+                    stream.synchronize()
+                    cpu_pred_full[X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:last_batch_size]
+
+            return cpu_pred_full
+
+    def predict_staged_old(self, X, iterations=None, batch_size=100_000):
         """Make prediction from different stages for the feature matrix X
 
         Args:
@@ -578,6 +693,131 @@ class Ensemble:
                     cpu_pred_full[i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:batch_size]
 
                 self.postprocess_fn(gpu_pred[nst][:real_batch_len]).get(out=cpu_pred[nst][:real_batch_len])
+                cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
+
+                last_batch_size = real_batch_len
+                last_n_stream = nst
+
+        # waiting for sync of last two batches
+        if int(np.floor(X.shape[0] / batch_size)) == 0:  # only one stream was used
+            with map_streams[last_n_stream] as stream:
+                stream.synchronize()
+                cpu_pred_full[:last_batch_size] = cpu_pred[last_n_stream][:last_batch_size]
+        else:
+            with map_streams[1 - last_n_stream] as stream:
+                stream.synchronize()
+                cpu_pred_full[X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = \
+                    cpu_pred[1 - last_n_stream][:batch_size]
+            with map_streams[last_n_stream] as stream:
+                stream.synchronize()
+                cpu_pred_full[X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:last_batch_size]
+
+        return cpu_pred_full
+
+    def predict_staged(self, X, iterations=None, batch_size=100_000):
+        """Make prediction from different stages for the feature matrix X
+
+        Args:
+            X: 2d np.ndarray of float32, array of features
+            iterations: list of int or None. If list of ints is passed, prediction will be made only
+                for given iterations, otherwise - for all iterations
+            batch_size: int, inner batch splitting size to avoid OOM
+
+        Returns:
+            prediction, np.ndarray 2d of float32, shape (n_iterations, n_data, n_out)
+        """
+        # Iteration list validation
+        if iterations is None:
+            iterations = list(range(len(self.models)))
+        if len(iterations) == 0:
+            return np.empty(0, dtype=np.float32)
+        if min(iterations) < 0 or max(iterations) >= len(self.models):
+            raise Exception("Invalid stage numbers")
+        if all(isinstance(el, int) for el in iterations) is False:
+            raise Exception("Stage numbers must be int type")
+        if len(set(iterations)) != len(iterations):
+            raise Exception("Duplicate values in stages are not allowed")
+        if sorted(iterations) != iterations:
+            raise Exception("Stages in iterations list should be sorted in ascending order beforehand")
+
+        # general initialization
+        self.to_device()
+
+        check_grp = np.unique([x.ngroups for x in self.models])
+        if check_grp.shape[0] > 1:
+            raise ValueError('Different number of groups in trees')
+        n_groups = check_grp[0]
+        n_out = self.base_score.shape[0]
+
+        # special case handle if X is already on device
+        if type(X) is cp.ndarray:
+            cpu_pred = np.empty((len(iterations), X.shape[0], n_out), dtype=np.float32)
+            gpu_pred = cp.empty((X.shape[0], n_out), dtype=np.float32)
+            gpu_pred_leaves = cp.empty((X.shape[0], n_groups), dtype=np.int32)
+
+            gpu_pred[:] = self.base_score
+            next_out = 0
+            for n, tree in enumerate(self.models):
+                tree.predict(X, gpu_pred, gpu_pred_leaves)
+                if n == iterations[next_out]:
+                    cp.cuda.get_current_stream().synchronize()
+                    self.postprocess_fn(gpu_pred).get(out=cpu_pred[next_out])
+                    cp.cuda.get_current_stream().synchronize()
+
+                    next_out += 1
+                    if next_out >= len(iterations):
+                        break
+
+            return cpu_pred
+
+        n_streams = 2  # don't change
+        map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
+
+        # result allocation
+        cpu_pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=np.int32)
+        cpu_pred = [pinned_array(np.empty((len(iterations), batch_size, n_out), dtype=np.int32)) for _ in range(n_streams)]
+        gpu_pred = [cp.empty((batch_size, n_out), dtype=np.int32) for _ in range(n_streams)]
+
+        # temp buffer for leaves
+        gpu_pred_leaves = [cp.empty((batch_size, n_groups), dtype=cp.int32) for _ in range(n_streams)]
+
+        # batch allocation
+        cpu_batch = [pinned_array(np.empty(X[0:batch_size].shape, dtype=np.float32)) for _ in range(n_streams)]
+        gpu_batch = [cp.empty(X[0:batch_size].shape, dtype=np.float32) for _ in range(n_streams)]
+
+        cpu_batch_free_event = [None, None]
+        cpu_out_ready_event = [None, None]
+        last_batch_size = 0
+        last_n_stream = 0
+        for k, i in enumerate(range(0, X.shape[0], batch_size)):
+            nst = k % n_streams
+            with map_streams[nst] as stream:
+                real_batch_len = batch_size if i + batch_size <= X.shape[0] else X.shape[0] - i
+
+                if k >= 2:
+                    cpu_batch_free_event[nst].synchronize()
+                cpu_batch[nst][:real_batch_len] = X[i:i + real_batch_len].astype(np.float32)
+
+                if k >= 2:
+                    cpu_out_ready_event[nst].synchronize()
+                gpu_batch[nst][:real_batch_len].set(cpu_batch[nst][:real_batch_len])
+                cpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
+
+                gpu_pred[nst][:] = self.base_score
+
+                i_next = 0
+                for i_tree, tree in enumerate(self.models):
+                    tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len],
+                                 gpu_pred_leaves[nst][:real_batch_len])
+                    if iterations[i_next] == i_tree:
+                        self.postprocess_fn(gpu_pred[nst][:real_batch_len]).get(out=cpu_pred[nst][i_next][:real_batch_len])
+                        i_next += 1
+                    if i_next == len(iterations):
+                        break
+
+                if k >= 2:
+                    cpu_pred_full[i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:batch_size]
+
                 cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
 
                 last_batch_size = real_batch_len
