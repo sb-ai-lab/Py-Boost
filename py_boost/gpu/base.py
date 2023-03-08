@@ -428,6 +428,8 @@ class Ensemble:
             raise Exception("Invalid stage numbers")
         if all(isinstance(el, int) for el in iterations) is False:
             raise Exception("Stage numbers must be int type")
+        if sorted(iterations) != iterations:
+            raise Exception("Stages in iterations list should be sorted in ascending order beforehand")
 
         # general initialization
         self.to_device()
