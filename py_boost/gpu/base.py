@@ -320,22 +320,21 @@ class Ensemble:
         if len(iterations) == 0:
             return np.empty(0, dtype=np.float32)
         if min(iterations) < 0 or max(iterations) >= len(self.models):
-            raise Exception("Invalid stage numbers")
+            raise ValueError("Invalid stage numbers")
         if all(isinstance(el, int) for el in iterations) is False:
-            raise Exception("Stage numbers must be int type")
-
-        self.to_device()
-
+            raise ValueError("Stage numbers must be int type")
+        if len(set(iterations)) != len(iterations):
+            raise ValueError("Duplicate values in stages are not allowed")
         check_grp = np.unique([x.ngroups for x in self.models])
         if check_grp.shape[0] > 1:
             raise ValueError('Different number of groups in trees')
         ngroups = check_grp[0]
 
-        n_streams = 2  # don't change
-        map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
-
-        # special case handle if X is already on device
-        if type(X) is cp.ndarray:
+        self.to_device()
+        # special case handle, if X is already on device or size of X <= batch_size
+        if type(X) is cp.ndarray or X.shape[0] <= batch_size:
+            if type(X) is not cp.ndarray:
+                X = cp.array(X, dtype=cp.float32)
             cpu_pred = np.empty((len(iterations), X.shape[0], ngroups), dtype=np.int32)
             gpu_pred = cp.empty((len(iterations), X.shape[0], ngroups), dtype=np.int32)
 
@@ -346,16 +345,20 @@ class Ensemble:
             gpu_pred.get(out=cpu_pred)
             return cpu_pred
 
+        n_streams = 2  # don't change
+        map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
+
         # result allocation
         cpu_leaves_full = np.empty((len(iterations), X.shape[0], ngroups), dtype=np.int32)
         cpu_leaves = [pinned_array(np.empty((len(iterations), batch_size, ngroups), dtype=np.int32)) for _ in range(n_streams)]
-        gpu_leaves = [cp.empty((len(iterations), batch_size, ngroups), dtype=np.int32) for _ in range(n_streams)]
+        gpu_leaves = [cp.empty((len(iterations), batch_size, ngroups), dtype=cp.int32) for _ in range(n_streams)]
 
         # batch allocation
         cpu_batch = [pinned_array(np.empty(X[0:batch_size].shape, dtype=np.float32)) for _ in range(n_streams)]
-        gpu_batch = [cp.empty(X[0:batch_size].shape, dtype=np.float32) for _ in range(n_streams)]
+        gpu_batch = [cp.empty(X[0:batch_size].shape, dtype=cp.float32) for _ in range(n_streams)]
 
         cpu_batch_free_event = [None, None]
+        gpu_batch_free_event = [None, None]
         cpu_out_ready_event = [None, None]
         last_batch_size = 0
         last_n_stream = 0
@@ -364,46 +367,45 @@ class Ensemble:
             with map_streams[nst] as stream:
                 real_batch_len = batch_size if i + batch_size <= X.shape[0] else X.shape[0] - i
 
+                # if cpu_batch is available, copy X batch to pinned memory on H
                 if k >= 2:
                     cpu_batch_free_event[nst].synchronize()
                 cpu_batch[nst][:real_batch_len] = X[i:i + real_batch_len].astype(np.float32)
 
+                # copy X batch from pinned memory to D
                 if k >= 2:
-                    cpu_out_ready_event[nst].synchronize()
+                    gpu_batch_free_event[nst].synchronize()
                 gpu_batch[nst][:real_batch_len].set(cpu_batch[nst][:real_batch_len])
                 cpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
 
-                gpu_leaves[nst][:] = 0
-
+                # when gpu_leaves is available and cpu_out is ready, proceed to the prediction
+                if k >= 2:
+                    cpu_out_ready_event[nst].synchronize()
                 for j, n in enumerate(iterations):
                     self.models[n].predict_leaf(gpu_batch[nst][:real_batch_len], gpu_leaves[nst][j][:real_batch_len])
+                gpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
 
+                # copy prediction from pinned memory to pageable memory on H (from previous iteration)
                 if k >= 2:
                     for j, n in enumerate(iterations):
                         cpu_leaves_full[j][i - 2 * batch_size: i - batch_size] = cpu_leaves[nst][j][:batch_size]
 
-                gpu_leaves[nst].get(out=cpu_leaves[nst])
+                # copy predictions from device to pinned memory on H
+                gpu_leaves[nst][:real_batch_len].get(out=cpu_leaves[nst][:real_batch_len])
                 cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
 
                 last_batch_size = real_batch_len
                 last_n_stream = nst
 
-        # waiting for sync of last two batches
-        if int(np.floor(X.shape[0] / batch_size)) == 0:  # only one stream was used
-            with map_streams[last_n_stream] as stream:
-                stream.synchronize()
-                for j, n in enumerate(iterations):
-                    cpu_leaves_full[j][:last_batch_size] = cpu_leaves[last_n_stream][j][:last_batch_size]
-        else:
-            with map_streams[1 - last_n_stream] as stream:
-                stream.synchronize()
-                for j, n in enumerate(iterations):
-                    cpu_leaves_full[j][X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = \
-                        cpu_leaves[1 - last_n_stream][j][:batch_size]
-            with map_streams[last_n_stream] as stream:
-                stream.synchronize()
-                for j, n in enumerate(iterations):
-                    cpu_leaves_full[j][X.shape[0] - last_batch_size:] = cpu_leaves[last_n_stream][j][:last_batch_size]
+        with map_streams[1 - last_n_stream] as stream:
+            cpu_out_ready_event[1 - last_n_stream].synchronize()
+            for j, n in enumerate(iterations):
+                cpu_leaves_full[j][X.shape[0] - (batch_size + last_batch_size): X.shape[0] - last_batch_size] = \
+                    cpu_leaves[1 - last_n_stream][j][:batch_size]
+        with map_streams[last_n_stream] as stream:
+            cpu_out_ready_event[last_n_stream].synchronize()
+            for j, n in enumerate(iterations):
+                cpu_leaves_full[j][X.shape[0] - last_batch_size:] = cpu_leaves[last_n_stream][j][:last_batch_size]
 
         return cpu_leaves_full
 
@@ -624,18 +626,17 @@ class Ensemble:
         Returns:
             prediction: np.ndarray 2d of float32, shape (n_data, n_outputs)
         """
-        # general initialization
-        self.to_device()
         check_grp = np.unique([x.ngroups for x in self.models])
         if check_grp.shape[0] > 1:
             raise ValueError('Different number of groups in trees')
         ngroups = check_grp[0]
         n_out = self.base_score.shape[0]
 
+        self.to_device()
         # special case handle, if X is already on device or size of X <= batch_size
         if type(X) is cp.ndarray or X.shape[0] <= batch_size:
             if type(X) is not cp.ndarray:
-                X = cp.array(X, dtype=np.float32)
+                X = cp.array(X, dtype=cp.float32)
             cpu_pred = np.empty((X.shape[0], n_out), dtype=np.float32)
             gpu_pred = cp.empty((X.shape[0], n_out), dtype=cp.float32)
             gpu_pred_leaves = cp.empty((X.shape[0], ngroups), dtype=cp.int32)
@@ -647,7 +648,6 @@ class Ensemble:
 
             cp.cuda.get_current_stream().synchronize()
             self.postprocess_fn(gpu_pred).get(out=cpu_pred)
-
             return cpu_pred
 
         # cuda stream allocation
@@ -730,49 +730,43 @@ class Ensemble:
         Returns:
             prediction, np.ndarray 2d of float32, shape (n_iterations, n_data, n_out)
         """
-        # Iteration list validation
         if iterations is None:
             iterations = list(range(len(self.models)))
         if len(iterations) == 0:
             return np.empty(0, dtype=np.float32)
         if min(iterations) < 0 or max(iterations) >= len(self.models):
-            raise Exception("Invalid stage numbers")
+            raise ValueError("Invalid stage numbers")
         if all(isinstance(el, int) for el in iterations) is False:
-            raise Exception("Stage numbers must be int type")
+            raise ValueError("Stage numbers must be int type")
         if len(set(iterations)) != len(iterations):
-            raise Exception("Duplicate values in stages are not allowed")
+            raise ValueError("Duplicate values in stages are not allowed")
         if sorted(iterations) != iterations:
-            raise Exception("Stages in iterations list should be sorted in ascending order beforehand")
-
-        # general initialization
-        self.to_device()
-
+            raise ValueError("Stages in iterations list should be sorted in ascending order beforehand")
         check_grp = np.unique([x.ngroups for x in self.models])
         if check_grp.shape[0] > 1:
             raise ValueError('Different number of groups in trees')
         n_groups = check_grp[0]
         n_out = self.base_score.shape[0]
 
-        # special case handle if X is already on device
-        if type(X) is cp.ndarray:
+        self.to_device()
+        # special case handle, if X is already on device or size of X <= batch_size
+        if type(X) is cp.ndarray or X.shape[0] <= batch_size:
+            if type(X) is not cp.ndarray:
+                X = cp.array(X, dtype=cp.float32)
             cpu_pred = np.empty((len(iterations), X.shape[0], n_out), dtype=np.float32)
-            gpu_pred = cp.empty((X.shape[0], n_out), dtype=np.float32)
-            gpu_pred_leaves = cp.empty((X.shape[0], n_groups), dtype=np.int32)
+            gpu_pred = cp.empty((X.shape[0], n_out), dtype=cp.float32)
+            gpu_pred_leaves = cp.empty((X.shape[0], n_groups), dtype=cp.int32)
 
             gpu_pred[:] = self.base_score
             next_out = 0
             for n, tree in enumerate(self.models):
                 tree.predict(X, gpu_pred, gpu_pred_leaves)
                 if n == iterations[next_out]:
-                    cp.cuda.get_current_stream().synchronize()
                     self.postprocess_fn(gpu_pred).get(out=cpu_pred[next_out])
-                    cp.cuda.get_current_stream().synchronize()
-
                     next_out += 1
                     if next_out >= len(iterations):
-                        break
-
-            return cpu_pred
+                        cp.cuda.get_current_stream().synchronize()
+                        return cpu_pred
 
         n_streams = 2  # don't change
         map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
@@ -780,7 +774,7 @@ class Ensemble:
         # result allocation
         cpu_pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=np.float32)
         cpu_pred = [pinned_array(np.empty((len(iterations), batch_size, n_out), dtype=np.float32)) for _ in range(n_streams)]
-        gpu_pred = [cp.empty((batch_size, n_out), dtype=np.float32) for _ in range(n_streams)]
+        gpu_pred = [cp.empty((batch_size, n_out), dtype=cp.float32) for _ in range(n_streams)]
 
         # temp buffer for leaves
         gpu_pred_leaves = [cp.empty((batch_size, n_groups), dtype=cp.int32) for _ in range(n_streams)]
@@ -798,16 +792,21 @@ class Ensemble:
             with map_streams[nst] as stream:
                 real_batch_len = batch_size if i + batch_size <= X.shape[0] else X.shape[0] - i
 
+                # if cpu_batch is available, copy X batch to pinned memory on H
                 if k >= 2:
                     cpu_batch_free_event[nst].synchronize()
                 cpu_batch[nst][:real_batch_len] = X[i:i + real_batch_len].astype(np.float32)
-                gpu_batch[nst][:real_batch_len].set(cpu_batch[nst][:real_batch_len])
-                cpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
 
+                # copy X batch from pinned memory to D
                 if k >= 2:
                     cpu_out_ready_event[nst].synchronize()
-                    cpu_pred_full[:, i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:, :batch_size]
+                gpu_batch[nst][:real_batch_len].set(cpu_batch[nst][:real_batch_len])
+                cpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
                 gpu_pred[nst][:] = self.base_score
+
+                # copy prediction from pinned memory to pageable memory on H (from previous iteration)
+                if k >= 2:
+                    cpu_pred_full[:, i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:, :batch_size]
 
                 i_next = 0
                 for i_tree, tree in enumerate(self.models):
@@ -816,24 +815,20 @@ class Ensemble:
                     if iterations[i_next] == i_tree:
                         self.postprocess_fn(gpu_pred[nst][:real_batch_len]).get(out=cpu_pred[nst][i_next][:real_batch_len])
                         i_next += 1
-                        if i_next == len(iterations):
-                            cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
+                        if i_next >= len(iterations):
                             break
+                cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
 
                 last_batch_size = real_batch_len
                 last_n_stream = nst
 
         # waiting for sync of last two batches
-        if int(np.floor(X.shape[0] / batch_size)) == 0:  # only one stream was used
-            with map_streams[last_n_stream] as stream:
-                stream.synchronize()
-                cpu_pred_full[:, :last_batch_size] = cpu_pred[last_n_stream][:, :last_batch_size]
-        else:
-            with map_streams[1 - last_n_stream] as stream:
-                stream.synchronize()
-                cpu_pred_full[:, X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = cpu_pred[1 - last_n_stream][:, :batch_size]
-            with map_streams[last_n_stream] as stream:
-                stream.synchronize()
-                cpu_pred_full[:, X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:, :last_batch_size]
+        with map_streams[1 - last_n_stream]:
+            cpu_out_ready_event[1 - last_n_stream].synchronize()
+            cpu_pred_full[:, X.shape[0] - (batch_size + last_batch_size): X.shape[0] - last_batch_size] =\
+                cpu_pred[1 - last_n_stream][:, :batch_size]
+        with map_streams[last_n_stream] as stream:
+            cpu_out_ready_event[last_n_stream].synchronize()
+            cpu_pred_full[:, X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:, :last_batch_size]
 
         return cpu_pred_full
