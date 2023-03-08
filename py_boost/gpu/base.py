@@ -774,9 +774,9 @@ class Ensemble:
         map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
 
         # result allocation
-        cpu_pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=np.int32)
-        cpu_pred = [pinned_array(np.empty((len(iterations), batch_size, n_out), dtype=np.int32)) for _ in range(n_streams)]
-        gpu_pred = [cp.empty((batch_size, n_out), dtype=np.int32) for _ in range(n_streams)]
+        cpu_pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=np.float32)
+        cpu_pred = [pinned_array(np.empty((len(iterations), batch_size, n_out), dtype=np.float32)) for _ in range(n_streams)]
+        gpu_pred = [cp.empty((batch_size, n_out), dtype=np.float32) for _ in range(n_streams)]
 
         # temp buffer for leaves
         gpu_pred_leaves = [cp.empty((batch_size, n_groups), dtype=cp.int32) for _ in range(n_streams)]
