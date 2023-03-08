@@ -466,6 +466,7 @@ class Ensemble:
 
         # result allocation
         cpu_pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=cur_dtype)
+        cpu_pred = pinned_array(np.empty((batch_size, n_out), dtype=cur_dtype))
         gpu_pred = cp.empty((batch_size, n_out), dtype=cur_dtype)
 
         # temp buffer for leaves
@@ -488,8 +489,9 @@ class Ensemble:
                     tree.predict(gpu_batch[:real_batch_len], gpu_pred[:real_batch_len], gpu_pred_leaves[:real_batch_len])
                     if n == iterations[next_out]:
                         stream.synchronize()
-                        #self.postprocess_fn(gpu_pred[:real_batch_len]).get(out=cpu_pred_full[next_out][i:i + real_batch_len])
+                        self.postprocess_fn(gpu_pred[:real_batch_len]).get(out=cpu_pred[:real_batch_len])
                         stream.synchronize()
+                        cpu_pred_full[next_out][i:i + real_batch_len] = cpu_pred[:real_batch_len]
 
                         next_out += 1
                         if next_out >= len(iterations):
