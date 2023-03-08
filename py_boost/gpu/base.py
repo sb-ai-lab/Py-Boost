@@ -488,7 +488,7 @@ class Ensemble:
                     tree.predict(gpu_batch[:real_batch_len], gpu_pred[:real_batch_len], gpu_pred_leaves[:real_batch_len])
                     if n == iterations[next_out]:
                         stream.synchronize()
-                        self.postprocess_fn(gpu_pred[:real_batch_len]).get(out=cpu_pred_full[next_out][i:i + real_batch_len])
+                        #self.postprocess_fn(gpu_pred[:real_batch_len]).get(out=cpu_pred_full[next_out][i:i + real_batch_len])
                         stream.synchronize()
 
                         next_out += 1
