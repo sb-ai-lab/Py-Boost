@@ -797,12 +797,12 @@ class Ensemble:
                 if k >= 2:
                     cpu_batch_free_event[nst].synchronize()
                 cpu_batch[nst][:real_batch_len] = X[i:i + real_batch_len].astype(np.float32)
-
-                if k >= 2:
-                    cpu_out_ready_event[nst].synchronize()
                 gpu_batch[nst][:real_batch_len].set(cpu_batch[nst][:real_batch_len])
                 cpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
 
+                if k >= 2:
+                    cpu_out_ready_event[nst].synchronize()
+                    cpu_pred_full[:, i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:, :batch_size]
                 gpu_pred[nst][:] = self.base_score
 
                 i_next = 0
@@ -812,13 +812,9 @@ class Ensemble:
                     if iterations[i_next] == i_tree:
                         self.postprocess_fn(gpu_pred[nst][:real_batch_len]).get(out=cpu_pred[nst][i_next][:real_batch_len])
                         i_next += 1
-                    if i_next == len(iterations):
-                        break
-
-                if k >= 2:
-                    cpu_pred_full[:, i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:, :batch_size]
-
-                cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
+                        if i_next == len(iterations):
+                            cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
+                            break
 
                 last_batch_size = real_batch_len
                 last_n_stream = nst
