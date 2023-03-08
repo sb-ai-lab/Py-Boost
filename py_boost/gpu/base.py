@@ -816,7 +816,7 @@ class Ensemble:
                         break
 
                 if k >= 2:
-                    cpu_pred_full[i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:batch_size]
+                    cpu_pred_full[:, i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:, :batch_size]
 
                 cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
 
