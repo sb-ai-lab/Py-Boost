@@ -626,21 +626,18 @@ class Ensemble:
         """
         # general initialization
         self.to_device()
-
         check_grp = np.unique([x.ngroups for x in self.models])
         if check_grp.shape[0] > 1:
             raise ValueError('Different number of groups in trees')
         ngroups = check_grp[0]
-
-        cur_dtype = np.float32
         n_out = self.base_score.shape[0]
-        n_streams = 2  # don't change
-        map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
 
-        # special case handle, if X is already on device
-        if type(X) is cp.ndarray:
-            cpu_pred = np.empty((X.shape[0], n_out), dtype=cur_dtype)
-            gpu_pred = cp.empty((X.shape[0], n_out), dtype=cur_dtype)
+        # special case handle, if X is already on device or size of X <= batch_size
+        if type(X) is cp.ndarray or X.shape[0] <= batch_size:
+            if type(X) is not cp.ndarray:
+                X = cp.array(X, dtype=np.float32)
+            cpu_pred = np.empty((X.shape[0], n_out), dtype=np.float32)
+            gpu_pred = cp.empty((X.shape[0], n_out), dtype=cp.float32)
             gpu_pred_leaves = cp.empty((X.shape[0], ngroups), dtype=cp.int32)
 
             gpu_pred[:] = self.base_score
@@ -653,19 +650,24 @@ class Ensemble:
 
             return cpu_pred
 
+        # cuda stream allocation
+        n_streams = 2  # don't change
+        map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
+
         # result allocation
-        cpu_pred_full = np.empty((X.shape[0], n_out), dtype=cur_dtype)
-        cpu_pred = [pinned_array(np.empty((batch_size, n_out), dtype=cur_dtype)) for _ in range(n_streams)]
-        gpu_pred = [cp.empty((batch_size, n_out), dtype=cur_dtype) for _ in range(n_streams)]
+        cpu_pred_full = np.empty((X.shape[0], n_out), dtype=np.float32)
+        cpu_pred = [pinned_array(np.empty((batch_size, n_out), dtype=np.float32)) for _ in range(n_streams)]
+        gpu_pred = [cp.empty((batch_size, n_out), dtype=cp.float32) for _ in range(n_streams)]
 
         # temp buffer for leaves
         gpu_pred_leaves = [cp.empty((batch_size, ngroups), dtype=cp.int32) for _ in range(n_streams)]
 
         # batch allocation
-        cpu_batch = [pinned_array(np.empty(X[0:batch_size].shape, dtype=cur_dtype)) for _ in range(n_streams)]
-        gpu_batch = [cp.empty(X[0:batch_size].shape, dtype=cur_dtype) for _ in range(n_streams)]
+        cpu_batch = [pinned_array(np.empty(X[0:batch_size].shape, dtype=np.float32)) for _ in range(n_streams)]
+        gpu_batch = [cp.empty(X[0:batch_size].shape, dtype=cp.float32) for _ in range(n_streams)]
 
         cpu_batch_free_event = [None, None]
+        gpu_batch_free_event = [None, None]
         cpu_out_ready_event = [None, None]
         last_batch_size = 0
         last_n_stream = 0
@@ -674,24 +676,31 @@ class Ensemble:
             with map_streams[nst] as stream:
                 real_batch_len = batch_size if i + batch_size <= X.shape[0] else X.shape[0] - i
 
+                # if cpu_batch is available, copy X batch to pinned memory on H
                 if k >= 2:
                     cpu_batch_free_event[nst].synchronize()
-                cpu_batch[nst][:real_batch_len] = X[i:i + real_batch_len].astype(cur_dtype)
+                cpu_batch[nst][:real_batch_len] = X[i:i + real_batch_len].astype(cp.float32)
 
+                # copy X batch from pinned memory to D
                 if k >= 2:
-                    cpu_out_ready_event[nst].synchronize()
+                    gpu_batch_free_event[nst].synchronize()
                 gpu_batch[nst][:real_batch_len].set(cpu_batch[nst][:real_batch_len])
                 cpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
 
+                # when gpu_pred is available and cpu_out is ready, proceed to the prediction
+                if k >= 2:
+                    cpu_out_ready_event[nst].synchronize()
                 gpu_pred[nst][:] = self.base_score
-
                 for tree in self.models:
                     tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len],
                                  gpu_pred_leaves[nst][:real_batch_len])
+                gpu_batch_free_event[nst] = stream.record(cp.cuda.Event(block=True))
 
+                # copy prediction from pinned memory to pageable memory on H (from previous iteration)
                 if k >= 2:
                     cpu_pred_full[i - 2 * batch_size: i - batch_size] = cpu_pred[nst][:batch_size]
 
+                # copy predictions from device to pinned memory on H
                 self.postprocess_fn(gpu_pred[nst][:real_batch_len]).get(out=cpu_pred[nst][:real_batch_len])
                 cpu_out_ready_event[nst] = stream.record(cp.cuda.Event(block=True))
 
@@ -699,18 +708,13 @@ class Ensemble:
                 last_n_stream = nst
 
         # waiting for sync of last two batches
-        if int(np.floor(X.shape[0] / batch_size)) == 0:  # only one stream was used
-            with map_streams[last_n_stream] as stream:
-                stream.synchronize()
-                cpu_pred_full[:last_batch_size] = cpu_pred[last_n_stream][:last_batch_size]
-        else:
-            with map_streams[1 - last_n_stream] as stream:
-                stream.synchronize()
-                cpu_pred_full[X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = \
-                    cpu_pred[1 - last_n_stream][:batch_size]
-            with map_streams[last_n_stream] as stream:
-                stream.synchronize()
-                cpu_pred_full[X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:last_batch_size]
+        with map_streams[1 - last_n_stream]:
+            cpu_out_ready_event[1 - last_n_stream].synchronize()
+            cpu_pred_full[X.shape[0] - (batch_size + last_batch_size): X.shape[0] - last_batch_size] = \
+                cpu_pred[1 - last_n_stream][:batch_size]
+        with map_streams[last_n_stream]:
+            cpu_out_ready_event[last_n_stream].synchronize()
+            cpu_pred_full[X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:last_batch_size]
 
         return cpu_pred_full
 
