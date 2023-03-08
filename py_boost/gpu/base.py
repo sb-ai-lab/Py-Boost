@@ -827,14 +827,13 @@ class Ensemble:
         if int(np.floor(X.shape[0] / batch_size)) == 0:  # only one stream was used
             with map_streams[last_n_stream] as stream:
                 stream.synchronize()
-                cpu_pred_full[:last_batch_size] = cpu_pred[last_n_stream][:last_batch_size]
+                cpu_pred_full[:, :last_batch_size] = cpu_pred[last_n_stream][:, :last_batch_size]
         else:
             with map_streams[1 - last_n_stream] as stream:
                 stream.synchronize()
-                cpu_pred_full[X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = \
-                    cpu_pred[1 - last_n_stream][:batch_size]
+                cpu_pred_full[:, X.shape[0] - batch_size - last_batch_size: X.shape[0] - last_batch_size] = cpu_pred[1 - last_n_stream][:, :batch_size]
             with map_streams[last_n_stream] as stream:
                 stream.synchronize()
-                cpu_pred_full[X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:last_batch_size]
+                cpu_pred_full[:, X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:, :last_batch_size]
 
         return cpu_pred_full
