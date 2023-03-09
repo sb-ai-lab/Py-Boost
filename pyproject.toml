@@ -4,7 +4,8 @@ version = "0.4.0"
 description = "Python based GBDT"
 
 authors = ["Vakhrushev Anton <btbpanda@gmail.com>",
-           "Iosipoi Leonid"]
+           "Iosipoi Leonid",
+           "Sergey Kupriyanov"]
            
 readme = "README.md"
 

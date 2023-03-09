@@ -8,7 +8,7 @@ Modern gradient boosting toolkits are very complex and are written in low-level 
 
 Py-boost is a Python-based gradient boosting library which aims at overcoming the aforementioned problems. 
 
-**Authors**: [Anton Vakhrushev](https://kaggle.com/btbpanda), [Leonid Iosipoi](http://iosipoi.com/).
+**Authors**: [Anton Vakhrushev](https://kaggle.com/btbpanda), [Leonid Iosipoi](http://iosipoi.com/), [Sergey Kupriyanov](https://www.linkedin.com/in/sergeykupriyanov).
 
 
 ## Py-boost Key Features
