@@ -284,17 +284,16 @@ class Ensemble:
         Returns:
             importance: np.ndarray 1d of float32, shape (n_features)
         """
-
-        assert imp_type in ['gain', 'split'], "Importance type should be 'gain' or 'split'"
+        if imp_type not in ['gain', 'split']:
+            raise ValueError("Importance type should be 'gain' or 'split'")
         importance = np.zeros(self.nfeats, dtype=np.float32)
 
         for tree in self.models:
             if imp_type == 'split':
-                if type(tree.test_importance_gain) is not np.ndarray:
-                    feats = abs(tree.test_format.get()[::4]).astype(int) - 1
+                if type(tree.test_importance_split) is not np.ndarray:
+                    importance += tree.test_importance_split.get()
                 else:
-                    feats = abs(tree.test_format[::4].copy()).astype(int) - 1
-                np.add.at(importance, feats, 1)
+                    importance += tree.test_importance_split
             else:
                 if type(tree.test_importance_gain) is not np.ndarray:
                     importance += tree.test_importance_gain.get()
@@ -338,17 +337,19 @@ class Ensemble:
         self.to_device()
         # special case handle, if X is already on device or size of X <= batch_size
         if type(X) is cp.ndarray or X.shape[0] <= batch_size:
+            is_on_gpu = True
             if type(X) is not cp.ndarray:
+                is_on_gpu = False
                 X = cp.array(X, dtype=cp.float32)
-            cpu_pred = np.empty((len(iterations), X.shape[0], ngroups), dtype=np.int32)
             gpu_pred = cp.empty((len(iterations), X.shape[0], ngroups), dtype=np.int32)
 
             for j, n in enumerate(iterations):
                 self.models[n].predict_leaf(X, gpu_pred[j])
 
             cp.cuda.get_current_stream().synchronize()
-            gpu_pred.get(out=cpu_pred)
-            return cpu_pred
+            if is_on_gpu:
+                return gpu_pred
+            return gpu_pred.get()
 
         n_streams = 2  # don't change
         map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
@@ -436,9 +437,11 @@ class Ensemble:
         self.to_device()
         # special case handle, if X is already on device or size of X <= batch_size
         if type(X) is cp.ndarray or X.shape[0] <= batch_size:
+            is_on_gpu = True
             if type(X) is not cp.ndarray:
+                is_on_gpu = False
                 X = cp.array(X, dtype=cp.float32)
-            cpu_pred = np.empty((X.shape[0], n_out), dtype=np.float32)
+            # TODO: what if float64 on device or even int
             gpu_pred = cp.empty((X.shape[0], n_out), dtype=cp.float32)
             gpu_pred_leaves = cp.empty((X.shape[0], ngroups), dtype=cp.int32)
 
@@ -448,8 +451,10 @@ class Ensemble:
                 tree.predict(X, gpu_pred, gpu_pred_leaves)
 
             cp.cuda.get_current_stream().synchronize()
-            self.postprocess_fn(gpu_pred).get(out=cpu_pred)
-            return cpu_pred
+            pred = self.postprocess_fn(gpu_pred)
+            if is_on_gpu:
+                return pred
+            return pred.get()
 
         # cuda stream allocation
         n_streams = 2  # don't change
@@ -556,9 +561,13 @@ class Ensemble:
         self.to_device()
         # special case handle, if X is already on device or size of X <= batch_size
         if type(X) is cp.ndarray or X.shape[0] <= batch_size:
+            is_on_gpu = True
             if type(X) is not cp.ndarray:
+                is_on_gpu = False
                 X = cp.array(X, dtype=cp.float32)
-            cpu_pred = np.empty((len(iterations), X.shape[0], n_out), dtype=np.float32)
+                pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=np.float32)
+            else:
+                pred_full = cp.empty((len(iterations), X.shape[0], n_out), dtype=cp.float32)
             gpu_pred = cp.empty((X.shape[0], n_out), dtype=cp.float32)
             gpu_pred_leaves = cp.empty((X.shape[0], n_groups), dtype=cp.int32)
 
@@ -567,11 +576,14 @@ class Ensemble:
             for n, tree in enumerate(self.models):
                 tree.predict(X, gpu_pred, gpu_pred_leaves)
                 if n == iterations[next_out]:
-                    self.postprocess_fn(gpu_pred).get(out=cpu_pred[next_out])
+                    if is_on_gpu:
+                        pred_full[next_out] = self.postprocess_fn(gpu_pred)
+                    else:
+                        self.postprocess_fn(gpu_pred).get(out=pred_full[next_out])
                     next_out += 1
                     if next_out >= len(iterations):
                         cp.cuda.get_current_stream().synchronize()
-                        return cpu_pred
+                        return pred_full
 
         n_streams = 2  # don't change
         map_streams = [cp.cuda.Stream() for _ in range(n_streams)]
@@ -632,7 +644,7 @@ class Ensemble:
             cpu_out_ready_event[1 - last_n_stream].synchronize()
             cpu_pred_full[:, X.shape[0] - (batch_size + last_batch_size): X.shape[0] - last_batch_size] =\
                 cpu_pred[1 - last_n_stream][:, :batch_size]
-        with map_streams[last_n_stream] as stream:
+        with map_streams[last_n_stream]:
             cpu_out_ready_event[last_n_stream].synchronize()
             cpu_pred_full[:, X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:, :last_batch_size]
 

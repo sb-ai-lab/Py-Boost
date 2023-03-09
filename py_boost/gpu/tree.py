@@ -32,7 +32,8 @@ class Tree:
         values, shape (max_nodes, nout). Define output value for each node/output
         leaves, shape (max_leaves, ngroups). Assigns the leaf index to the terminal nodes
 
-    Note about format for faster inference:
+    During the fit stage, the format described above is used.
+    After fitting, additional reformatting occurs that converts the tree to another format to achieve faster inference:
     - Sub-trees for each group are stored in one array named "test_format":
         [gr0_node0, ..., gr0_nodeN, gr1_node0, ..., gr1_nodeM, gr2_node0, ..., gr2_nodeK, gr3_node0, ...]
     - Each node in new formatted tree consists of 4 fields:
@@ -42,7 +43,7 @@ class Tree:
         left_node_index - index of the left child in "test_format" array
         right_node_index - index of the right child in "test_format" array
     - The size of "test_format" array equals to the sum of all nodes in all subtrees except leaves multiplied by 4.
-        Multiplication by 4 occurs because each node consists of 4 fields described above.
+        Multiplication by 4 occurs because each node consists of the 4 fields described above.
         Examples:
             test_format[0 * 4] == test_format[0] - yields feature_index for node with index 0.
             test_format[0 * 4 + 1] == test_format[1] - yields split_value for node with index 0.
@@ -59,23 +60,23 @@ class Tree:
             test_format[79 * 4 + 2] == test_format[318] - yields left_node_index for node with index 79.
             test_format[79 * 4 + 3] == test_format[319] - yields right_node_index for node with index 79.
             ...
-    - The sign of the feature_index value shows the behaviour in case of feature == NaN (split to left or right),
-        to the value written in feature_index an extra "1" is added to deal with zero
+    - The sign of the feature_index value shows the behavior in case of feature == NaN (split to the left/right),
+        to the value written in feature_index an extra "1" is added to deal with zero.
         Examples:
             feature_index == 8, positive value means that tree follows to the left in case of NaN in feature,
                 the real feature index is calculated as follows: abs(8) - 1 = 7.
             feature_index == -19, negative value means that tree follows to the right in case of NaN in feature,
                 the real feature index is calculated as follows: abs(-19) - 1 = 18.
             feature_index == 0, impossible due to construction algorithm.
-    - If left_node_index/right_node_index node is negative, it means that it shows index in values array
-        in case of negative value an extra "1" is added to deal with zero to left/right nodes
+    - If left_node_index/right_node_index is negative, it means that it shows index in the values array;
+        In case of a negative value, an extra "1" is added to deal with zero.
         Examples:
             left_node_index == 8, non-negative value means that left child node is stored in "test_format" with index 8;
             left_node_index == -13, means that left child is a leaf, the index in "values" array for that leaf can
                 be calculated as follows: abs(-13) - 1 = 12. Thus, index in "values" array is 12.
-    - All subtrees are stored in one array, thus, additional array of indexes where each subtree is starting
+    - All subtrees are stored in one array, so an additional array of indexes where each subtree is starting
         is required (index of the subtree roots), array "gr_subtree_offsets" stores these indexes,
-        size of "gr_subtree_offsets" equals to the number of groups in tree (number of subtrees).
+        size of "gr_subtree_offsets" equals to number of groups in the tree (number of subtrees).
         Example:
             gr_subtree_offsets == [0, 56, 183], means that tree has 3 subtrees (3 groups).
             The first subtree has its root as node with index 0;
@@ -86,7 +87,6 @@ class Tree:
                 test_format[56 * 4 + 1] == test_format[225] - yields split_value for the root of the second subtree;
                 test_format[56 * 4 + 2] == test_format[226] - yields left_node_index for the root of the second subtree;
                 test_format[56 * 4 + 3] == test_format[227] - yields right_node_index for the root of the second subtree
-
     """
 
     def __init__(self, max_nodes, nout, ngroups):
@@ -114,11 +114,12 @@ class Tree:
         self.leaves = None
         self.max_leaves = None
 
+        self.feature_importance_gain = None
+        self.feature_importance_split = None
+
         self._debug = None
         self.test_format = None
         self.test_format_offsets = None
-        self.test_importance_gain = None
-        self.test_indexes = None
 
     def set_nodes(self, group, unique_nodes, new_nodes_id, best_feat, best_gain, best_split, best_nan_left):
         """Write info about new nodes
@@ -184,13 +185,14 @@ class Tree:
 
         """
         if self._debug:
-            for attr in ['values', 'test_format', 'test_format_offsets', 'test_importance_gain', 'test_indexes']:
+            for attr in ['values', 'test_format', 'test_format_offsets', 'group_index',
+                         'feature_importance_gain', 'feature_importance_split']:
                 arr = getattr(self, attr)
                 setattr(self, attr, cp.asarray(arr))
             return
 
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
-                     'test_format', 'test_format_offsets', 'test_importance_gain', 'test_indexes']:
+                     'test_format', 'test_format_offsets', 'feature_importance_gain', 'feature_importance_split']:
             arr = getattr(self, attr)
             setattr(self, attr, cp.asarray(arr))
 
@@ -201,13 +203,14 @@ class Tree:
 
         """
         if self._debug:
-            for attr in ['values', 'test_format', 'test_format_offsets', 'test_importance_gain', 'test_indexes']:
+            for attr in ['values', 'test_format', 'test_format_offsets', 'group_index',
+                         'feature_importance_gain', 'feature_importance_split']:
                 arr = getattr(self, attr)
                 setattr(self, attr, cp.asarray(arr))
             return
 
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
-                     'test_format', 'test_format_offsets', 'test_importance_gain', 'test_indexes']:
+                     'test_format', 'test_format_offsets', 'feature_importance_gain', 'feature_importance_split']:
             arr = getattr(self, attr)
             if type(arr) is not np.ndarray:
                 setattr(self, attr, arr.get())
@@ -284,7 +287,9 @@ class Tree:
             pred_leaves: leaf predictions
 
         """
-        # check if buffer is None
+        # check if buffer is None and X on GPU
+        if type(X) is not cp.ndarray:
+            raise Exception("X must be type of cp.ndarray (located on gpu)")
         if pred_leaves is None:
             pred_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
 
@@ -316,7 +321,9 @@ class Tree:
             pred: cp.ndarray, prediction array
 
         """
-        # check if buffers are None
+        # check if buffers are None and X on GPU
+        if type(X) is not cp.ndarray:
+            raise Exception("X must be type of cp.ndarray (located on gpu)")
         if pred is None:
             pred = cp.empty((X.shape[0], self.nout), dtype=cp.float32)
         if pred_leaves is None:
@@ -334,7 +341,7 @@ class Tree:
 
         # second step, prediction of actual values
         tree_prediction_values_kernel((blocks,), (threads,), ((pred_leaves,
-                                                               self.test_indexes,
+                                                               self.group_index,
                                                                self.values,
                                                                self.nout,
                                                                X.shape[0],
@@ -394,16 +401,19 @@ class Tree:
 
         self.test_format = nf
         self.test_format_offsets = gr_subtree_offsets
-        self.test_indexes = np.array(self.group_index, dtype=np.int32)
 
-        # importance with gain calc
-        self.test_importance_gain = np.zeros(nfeats, dtype=np.float32)
+        # feature_ importance with gain
+        self.feature_importance_gain = np.zeros(nfeats, dtype=np.float32)
         sl = self.feats >= 0
-        acc_val = self.gains[sl]
-        np.add.at(self.test_importance_gain, self.feats[sl], acc_val)
+        np.add.at(self.feature_importance_gain, self.feats[sl], self.gains[sl])
+
+        # feature_ importance with split
+        self.feature_importance_split = np.zeros(nfeats, dtype=np.float32)
+        sl = self.feats >= 0
+        np.add.at(self.feature_importance_split, self.feats[sl], 1)
 
         if debug is True:
-            for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'group_index', 'leaves']:
+            for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'leaves']:
                 delattr(self, attr)
 
 

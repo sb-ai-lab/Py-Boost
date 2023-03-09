@@ -175,9 +175,10 @@ class ColumnImportanceSampler(Callback):
             return self.imp
 
         for tree in model.models[-self.update_freq:]:
-            sl = tree.feats >= 0
-            acc_val = 1 if self.imp_type == 'split' else tree.gains[sl]
-            np.add.at(self.imp, tree.feats[sl], acc_val)
+            if self.imp_type == 'split':
+                self.imp += tree.feature_importance_split
+            else:
+                self.imp += tree.feature_importance_gain
 
         return self.imp
 
