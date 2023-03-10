@@ -4,8 +4,8 @@ import cupy as cp
 import numpy as np
 
 from .utils import apply_values, depthwise_grow_tree, get_tree_node, set_leaf_values, calc_node_values
-# from .utils import tree_prediction_leaves_kernel, tree_prediction_values_kernel
-from .utils import tree_prediction_leaves_typed_kernels, tree_prediction_values_kernel
+from .utils import tree_prediction_leaves_kernel, tree_prediction_values_kernel
+# from .utils import tree_prediction_leaves_typed_kernels, tree_prediction_values_kernel
 
 
 class Tree:
@@ -305,21 +305,21 @@ class Tree:
         if dt not in tree_prediction_leaves_typed_kernels.keys():
             raise TypeError(f"X array must be of type: {list(tree_prediction_leaves_typed_kernels.keys())}")
 
-        tree_prediction_leaves_typed_kernels[dt]((blocks,), (threads,), ((X,
-                                                                          self.test_format,
-                                                                          self.test_format_offsets,
-                                                                          X.shape[1],
-                                                                          X.shape[0],
-                                                                          self.ngroups,
-                                                                          pred_leaves)))
+        # tree_prediction_leaves_typed_kernels[dt]((blocks,), (threads,), ((X,
+        #                                                                   self.test_format,
+        #                                                                   self.test_format_offsets,
+        #                                                                   X.shape[1],
+        #                                                                   X.shape[0],
+        #                                                                   self.ngroups,
+        #                                                                   pred_leaves)))
 
-        # tree_prediction_leaves_kernel((blocks,), (threads,), ((X,
-        #                                                        self.test_format,
-        #                                                        self.test_format_offsets,
-        #                                                        X.shape[1],
-        #                                                        X.shape[0],
-        #                                                        self.ngroups,
-        #                                                        pred_leaves)))
+        tree_prediction_leaves_kernel((blocks,), (threads,), ((X,
+                                                               self.test_format,
+                                                               self.test_format_offsets,
+                                                               X.shape[1],
+                                                               X.shape[0],
+                                                               self.ngroups,
+                                                               pred_leaves)))
         return pred_leaves
 
     def predict(self, X, pred=None, pred_leaves=None):
@@ -336,7 +336,7 @@ class Tree:
         """
         # check if buffers are None and X on GPU
         if type(X) is not cp.ndarray:
-            raise Exception("X must be type of cp.ndarray (located on gpu)")
+            raise TypeError("X must be type of cp.ndarray (located on GPU)")
         if pred is None:
             pred = cp.empty((X.shape[0], self.nout), dtype=cp.float32)
         if pred_leaves is None:
