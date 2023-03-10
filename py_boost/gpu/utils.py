@@ -688,7 +688,7 @@ tree_prediction_values_kernel = cp.RawKernel(
     extern "C" __global__
     void tree_prediction_values_kernel(
         const int* leaves,
-        const int* indexes,
+        const unsigned long long* indexes,
         const float* values,
         const int n_out,
         const int x_size,
