@@ -4,7 +4,6 @@ import cupy as cp
 import numpy as np
 
 from .utils import apply_values, depthwise_grow_tree, get_tree_node, set_leaf_values, calc_node_values
-# from .utils import tree_prediction_leaves_kernel, tree_prediction_values_kernel
 from .utils import tree_prediction_leaves_typed_kernels, tree_prediction_values_kernel
 
 
@@ -88,6 +87,8 @@ class Tree:
                 test_format[56 * 4 + 1] == test_format[225] - yields split_value for the root of the second subtree;
                 test_format[56 * 4 + 2] == test_format[226] - yields left_node_index for the root of the second subtree;
                 test_format[56 * 4 + 3] == test_format[227] - yields right_node_index for the root of the second subtree
+    - Two fields, 'feature_importance_gain' and 'feature_importance_split', store feature importance arrays
+        and describe the fitted tree accordingly.
     """
 
     def __init__(self, max_nodes, nout, ngroups):
@@ -311,14 +312,6 @@ class Tree:
                                                                           X.shape[0],
                                                                           self.ngroups,
                                                                           pred_leaves)))
-
-        # tree_prediction_leaves_kernel((blocks,), (threads,), ((X,
-        #                                                        self.test_format,
-        #                                                        self.test_format_offsets,
-        #                                                        X.shape[1],
-        #                                                        X.shape[0],
-        #                                                        self.ngroups,
-        #                                                        pred_leaves)))
         return pred_leaves
 
     def predict(self, X, pred=None, pred_leaves=None):
