@@ -584,11 +584,21 @@ node_index_kernel = cp.ElementwiseKernel(
     'node_index_kernel')
 
 
-tree_prediction_leaves_kernel = cp.RawKernel(
+def get_predict_leaves_kernel_typed(a_type):
+    valid_types = {'float32': 'tree_prediction_leaves_kernel<float>',
+                   'float64': 'tree_prediction_leaves_kernel<double>',
+                   'int32': 'tree_prediction_leaves_kernel<int>',
+                   'int64': 'tree_prediction_leaves_kernel<long long>'}
+    if a_type not in valid_types.keys():
+        raise TypeError(f"X array must be of type: {list(valid_types.keys())}")
+    return tree_predict_leaves_module.get_function(valid_types[a_type])
+
+
+tree_predict_leaves_module = cp.RawModule(code=
     r'''
-    extern "C" __global__
-    void tree_prediction_leaves_kernel(
-        const float* X,
+    template<typename T>
+    __global__ void tree_prediction_leaves_kernel(
+        const T* X,
         const float4* tree,
         const int* gr_subtree_offsets,
         const int n_features,
@@ -608,7 +618,7 @@ tree_prediction_leaves_kernel = cp.RawKernel(
 
         int n_node = 0;
         float4 nd;
-        float x;
+        T x;
         int n_feat_raw;
 
         // going through the tree
@@ -621,7 +631,7 @@ tree_prediction_leaves_kernel = cp.RawKernel(
             if (isnan(x)) {
                 n_node = (n_feat_raw > 0) ? (int)nd.w : (int)nd.z;
             } else {
-                n_node = (x > nd.y) ? (int)nd.w : (int)nd.z;
+                n_node = ((float)x > nd.y) ? (int)nd.w : (int)nd.z;
             }
         }
 
@@ -629,7 +639,59 @@ tree_prediction_leaves_kernel = cp.RawKernel(
         res[i_ * n_gr + j_] = (-n_node - 1);
     }
     ''',
-    'tree_prediction_leaves_kernel')
+    options=('-std=c++11',),
+    name_expressions=['tree_prediction_leaves_kernel<float>',
+                      'tree_prediction_leaves_kernel<double>',
+                      'tree_prediction_leaves_kernel<int>',
+                      'tree_prediction_leaves_kernel<long long>'])
+
+
+# tree_prediction_leaves_kernel = cp.RawKernel(
+#     r'''
+#     extern "C" __global__
+#     void tree_prediction_leaves_kernel(
+#         const float* X,
+#         const float4* tree,
+#         const int* gr_subtree_offsets,
+#         const int n_features,
+#         const int x_size,
+#         const int n_gr,
+#         int* res)
+#     {
+#         long long th = blockIdx.x * blockDim.x + threadIdx.x;
+#         long long i_ = th / n_gr;
+#         if (i_ >= x_size) {
+#             return;
+#         }
+#         int j_ = (int)(th % n_gr);
+#
+#         long long x_feat_offset = n_features * i_;
+#         int tree_offset = gr_subtree_offsets[j_];
+#
+#         int n_node = 0;
+#         float4 nd;
+#         float x;
+#         int n_feat_raw;
+#
+#         // going through the tree
+#         while (n_node >= 0) {
+#             nd = tree[tree_offset + n_node];
+#
+#             n_feat_raw = (int)nd.x;
+#             x = X[x_feat_offset + abs(n_feat_raw) - 1];
+#
+#             if (isnan(x)) {
+#                 n_node = (n_feat_raw > 0) ? (int)nd.w : (int)nd.z;
+#             } else {
+#                 n_node = (x > nd.y) ? (int)nd.w : (int)nd.z;
+#             }
+#         }
+#
+#         // writing result
+#         res[i_ * n_gr + j_] = (-n_node - 1);
+#     }
+#     ''',
+#     'tree_prediction_leaves_kernel')
 
 tree_prediction_values_kernel = cp.RawKernel(
     r'''

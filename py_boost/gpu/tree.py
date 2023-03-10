@@ -4,7 +4,8 @@ import cupy as cp
 import numpy as np
 
 from .utils import apply_values, depthwise_grow_tree, get_tree_node, set_leaf_values, calc_node_values
-from .utils import tree_prediction_leaves_kernel, tree_prediction_values_kernel
+#from .utils import tree_prediction_leaves_kernel, tree_prediction_values_kernel
+from .utils import get_predict_leaves_kernel_typed, tree_prediction_values_kernel
 
 
 class Tree:
@@ -300,13 +301,21 @@ class Tree:
         if sz % threads != 0:
             blocks += 1
 
-        tree_prediction_leaves_kernel((blocks,), (threads,), ((X,
+        get_predict_leaves_kernel_typed(str(X.dtype))((blocks,), (threads,), ((X,
                                                                self.test_format,
                                                                self.test_format_offsets,
                                                                X.shape[1],
                                                                X.shape[0],
                                                                self.ngroups,
                                                                pred_leaves)))
+
+        # tree_prediction_leaves_kernel((blocks,), (threads,), ((X,
+        #                                                        self.test_format,
+        #                                                        self.test_format_offsets,
+        #                                                        X.shape[1],
+        #                                                        X.shape[0],
+        #                                                        self.ngroups,
+        #                                                        pred_leaves)))
         return pred_leaves
 
     def predict(self, X, pred=None, pred_leaves=None):
