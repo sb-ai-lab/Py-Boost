@@ -630,13 +630,11 @@ generic_tree_prediction_leaves_kernel = r'''
 
 tree_prediction_leaves_typed_kernels = {
     'float32': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'float'),
-                            'tree_prediction_leaves_kernel_float32'),
+                            'tree_prediction_leaves_kernel_float'),
     'float64': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'double'),
-                            'tree_prediction_leaves_kernel_float64'),
+                            'tree_prediction_leaves_kernel_double'),
     'int32': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'int'),
-                          'tree_prediction_leaves_kernel_int32'),
-    'int64': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'long long'),
-                          'tree_prediction_leaves_kernel_int64')}
+                          'tree_prediction_leaves_kernel_int')}
 
 # tree_prediction_leaves_kernel = cp.RawKernel(
 #     r'''
