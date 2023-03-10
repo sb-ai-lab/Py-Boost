@@ -301,10 +301,9 @@ class Tree:
         if sz % threads != 0:
             blocks += 1
 
-        dt = str(X.dtype)
-        if dt not in tree_prediction_leaves_typed_kernels.keys():
-            raise TypeError(f"X array must be of type: {list(tree_prediction_leaves_typed_kernels.keys())}")
-
+        # dt = str(X.dtype)
+        # if dt not in tree_prediction_leaves_typed_kernels.keys():
+        #     raise TypeError(f"X array must be of type: {list(tree_prediction_leaves_typed_kernels.keys())}")
         # tree_prediction_leaves_typed_kernels[dt]((blocks,), (threads,), ((X,
         #                                                                   self.test_format,
         #                                                                   self.test_format_offsets,
