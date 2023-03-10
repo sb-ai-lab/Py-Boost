@@ -585,7 +585,7 @@ node_index_kernel = cp.ElementwiseKernel(
 
 generic_tree_prediction_leaves_kernel = r'''
     extern "C" __global__
-    void tree_prediction_leaves_kernel(
+    void tree_prediction_leaves_kernel_<T>(
         const <T>* X,
         const float4* tree,
         const int* gr_subtree_offsets,
