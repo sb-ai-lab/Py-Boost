@@ -5,7 +5,7 @@ import numpy as np
 
 from .utils import apply_values, depthwise_grow_tree, get_tree_node, set_leaf_values, calc_node_values
 # from .utils import tree_prediction_leaves_kernel, tree_prediction_values_kernel
-from .utils import tree_prediction_values_kernel, tree_prediction_leaves_typed_kernels
+from .utils import tree_prediction_leaves_typed_kernels, tree_prediction_values_kernel
 
 
 class Tree:
