@@ -424,7 +424,7 @@ class Tree:
         sl = self.feats >= 0
         np.add.at(self.feature_importance_split, self.feats[sl], 1)
 
-        self.group_index = self.group_index.astype('int32')
+        # self.group_index = self.group_index.astype('int32')
 
         if debug is True:
             for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'leaves']:
