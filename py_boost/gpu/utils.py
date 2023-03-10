@@ -583,22 +583,10 @@ node_index_kernel = cp.ElementwiseKernel(
 
     'node_index_kernel')
 
-
-def get_predict_leaves_kernel_typed(a_type):
-    valid_types = {'float32': 'tree_prediction_leaves_kernel<float>',
-                   'float64': 'tree_prediction_leaves_kernel<double>',
-                   'int32': 'tree_prediction_leaves_kernel<int>',
-                   'int64': 'tree_prediction_leaves_kernel<long long>'}
-    if a_type not in valid_types.keys():
-        raise TypeError(f"X array must be of type: {list(valid_types.keys())}")
-    return tree_predict_leaves_module.get_function(valid_types[a_type])
-
-
-tree_predict_leaves_module = cp.RawModule(code=
-    r'''
-    template<typename T>
-    __global__ void tree_prediction_leaves_kernel(
-        const T* X,
+generic_tree_prediction_leaves_kernel = r'''
+    extern "C" __global__
+    void tree_prediction_leaves_kernel(
+        const <T>* X,
         const float4* tree,
         const int* gr_subtree_offsets,
         const int n_features,
@@ -618,7 +606,7 @@ tree_predict_leaves_module = cp.RawModule(code=
 
         int n_node = 0;
         float4 nd;
-        T x;
+        <T> x;
         int n_feat_raw;
 
         // going through the tree
@@ -638,13 +626,17 @@ tree_predict_leaves_module = cp.RawModule(code=
         // writing result
         res[i_ * n_gr + j_] = (-n_node - 1);
     }
-    ''',
-    options=('-std=c++11',),
-    name_expressions=['tree_prediction_leaves_kernel<float>',
-                      'tree_prediction_leaves_kernel<double>',
-                      'tree_prediction_leaves_kernel<int>',
-                      'tree_prediction_leaves_kernel<long long>'])
+    '''
 
+tree_prediction_leaves_typed_kernels = {
+    'float32': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'float'),
+                            'tree_prediction_leaves_kernel_float32'),
+    'float64': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'double'),
+                            'tree_prediction_leaves_kernel_float64'),
+    'int32': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'int'),
+                          'tree_prediction_leaves_kernel_int32'),
+    'int64': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'long long'),
+                          'tree_prediction_leaves_kernel_int64')}
 
 # tree_prediction_leaves_kernel = cp.RawKernel(
 #     r'''
