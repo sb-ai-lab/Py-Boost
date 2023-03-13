@@ -184,7 +184,10 @@ class ClusterCandidates(Ensemble):
 
         for d in self.depth_range:
             builder = ClusterTreeBuilder(borders, max_depth=d, min_data_in_leaf=self.min_data_in_leaf, max_bin=max_bin)
-            self.models.append(builder.build_tree(X_cp, y))
+
+            tree = builder.build_tree(X_cp, y)
+            tree.reformat()
+            self.models.append(tree)
 
         self.base_score = np.zeros((1,), dtype=np.float32)
 
