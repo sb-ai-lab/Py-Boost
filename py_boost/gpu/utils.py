@@ -585,8 +585,8 @@ node_index_kernel = cp.ElementwiseKernel(
 
 generic_tree_prediction_leaves_kernel = r'''
     extern "C" __global__
-    void tree_prediction_leaves_kernel_<TT>(
-        const <T>* X,
+    void tree_prediction_leaves_kernel_{TT}(
+        const {T}* X,
         const float4* tree,
         const int* gr_subtree_offsets,
         const int n_features,
@@ -606,7 +606,7 @@ generic_tree_prediction_leaves_kernel = r'''
 
         int n_node = 0;
         float4 nd;
-        <T> x;
+        {T} x;
         int n_feat_raw;
 
         // going through the tree
@@ -615,12 +615,8 @@ generic_tree_prediction_leaves_kernel = r'''
 
             n_feat_raw = (int)nd.x;
             x = X[x_feat_offset + abs(n_feat_raw) - 1];
-
-            if (isnan(x)) {
-                n_node = (n_feat_raw > 0) ? (int)nd.w : (int)nd.z;
-            } else {
-                n_node = ((float)x > nd.y) ? (int)nd.w : (int)nd.z;
-            }
+            
+            {comp}
         }
 
         // writing result
@@ -628,14 +624,21 @@ generic_tree_prediction_leaves_kernel = r'''
     }
     '''
 
+comp_float = '''
+                if (isnan(x)) {
+                    n_node = (n_feat_raw > 0) ? (int)nd.w : (int)nd.z;
+                } else {
+                    n_node = ((float)x > nd.y) ? (int)nd.w : (int)nd.z;
+                }'''
+comp_int = "n_node = ((float)x > nd.y) ? (int)nd.w : (int)nd.z;"
 tree_prediction_leaves_typed_kernels = {
-    'float32': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'float').replace('<TT>', 'float'),
+    'float32': cp.RawKernel(generic_tree_prediction_leaves_kernel.format(T='float', TT='float', comp=comp_float),
                             'tree_prediction_leaves_kernel_float'),
-    'float64': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'double').replace('<TT>', 'double'),
+    'float64': cp.RawKernel(generic_tree_prediction_leaves_kernel.format(T='double', TT='double', comp=comp_float),
                             'tree_prediction_leaves_kernel_double'),
-    'int32': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'int').replace('<TT>', 'int'),
+    'int32': cp.RawKernel(generic_tree_prediction_leaves_kernel.format(T='int', TT='int', comp=comp_int),
                           'tree_prediction_leaves_kernel_int'),
-    'int64': cp.RawKernel(generic_tree_prediction_leaves_kernel.replace('<T>', 'long long').replace('<TT>', 'longlong'),
+    'int64': cp.RawKernel(generic_tree_prediction_leaves_kernel.format(T='long long', TT='longlong', comp=comp_int),
                           'tree_prediction_leaves_kernel_longlong')
 }
 
