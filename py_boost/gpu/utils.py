@@ -593,12 +593,12 @@ generic_tree_prediction_leaves_kernel = r'''
         const int x_size,
         const int n_gr,
         int* res)
-    {
+    {{
         long long th = blockIdx.x * blockDim.x + threadIdx.x;
         long long i_ = th / n_gr;
-        if (i_ >= x_size) {
+        if (i_ >= x_size) {{
             return;
-        }
+        }}
         int j_ = (int)(th % n_gr);
 
         long long x_feat_offset = n_features * i_;
@@ -610,18 +610,18 @@ generic_tree_prediction_leaves_kernel = r'''
         int n_feat_raw;
 
         // going through the tree
-        while (n_node >= 0) {
+        while (n_node >= 0) {{
             nd = tree[tree_offset + n_node];
 
             n_feat_raw = (int)nd.x;
             x = X[x_feat_offset + abs(n_feat_raw) - 1];
             
             {comp}
-        }
+        }}
 
         // writing result
         res[i_ * n_gr + j_] = (-n_node - 1);
-    }
+    }}
     '''
 
 comp_float = '''
