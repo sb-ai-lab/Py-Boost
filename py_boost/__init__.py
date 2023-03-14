@@ -28,7 +28,6 @@ from .utils.tl_wrapper import TLPredictor, TLCompiledPredictor
 __all__ = [
 
     'GradientBoosting',
-    'EnsembleInference',
     'SketchBoost',
     'TLPredictor',
     'TLCompiledPredictor',
