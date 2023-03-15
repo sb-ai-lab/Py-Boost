@@ -1,7 +1,11 @@
 """Common losses"""
 
-import cupy as cp
 import numpy as np
+try:
+    import cupy as cp
+    CUDA_FOUND = True
+except Exception:
+    CUDA_FOUND = False
 
 from .metrics import metric_alias, RMSEMetric, RMSLEMetric, BCEMetric
 from .multiclass_metrics import multiclass_metric_alias, CrossEntropyMetric
@@ -171,7 +175,7 @@ ce_grad_kernel = cp.ElementwiseKernel(
 
     """,
     "ce_grad_kernel"
-)
+) if CUDA_FOUND else None
 
 
 def ce_grad(y_true, y_pred):

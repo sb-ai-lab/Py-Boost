@@ -1,6 +1,9 @@
 """Decision trees building and inference"""
 
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 import numpy as np
 
 from .utils import apply_values, depthwise_grow_tree, get_tree_node, set_leaf_values, calc_node_values

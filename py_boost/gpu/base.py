@@ -1,6 +1,9 @@
 """Abstracts for the tree ensembles"""
 
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 import numpy as np
 
 from .utils import pinned_array

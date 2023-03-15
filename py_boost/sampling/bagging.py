@@ -1,8 +1,10 @@
 """Basic sampling strategy"""
 
-import cupy as cp
 import numpy as np
-
+try:
+    import cupy as cp
+except Exception:
+    pass
 from ..callbacks.callback import Callback
 
 
@@ -13,7 +15,7 @@ class BaseSampler(Callback):
         """
 
         Args:
-            sample: subsample to select at the each iteration
+            sample: subsample to select at each iteration
             axis: int, 0 for rows, 1 for columns
         """
         self.sample = sample

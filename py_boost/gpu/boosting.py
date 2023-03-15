@@ -1,7 +1,9 @@
 """Gradient boosting builder"""
 
-import cupy as cp
-
+try:
+    import cupy as cp
+except Exception:
+    pass
 from .base import Ensemble
 from .losses import loss_alias
 from .tree import DepthwiseTreeBuilder

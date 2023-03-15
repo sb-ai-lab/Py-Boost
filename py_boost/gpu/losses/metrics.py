@@ -1,6 +1,9 @@
 """Common metrics"""
 
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 
 
 class Metric:

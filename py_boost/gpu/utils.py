@@ -2,8 +2,12 @@
 
 import math
 import numba
-import cupy as cp
 import numpy as np
+try:
+    import cupy as cp
+    CUDA_FOUND = True
+except Exception:
+    CUDA_FOUND = False
 
 
 def validate_input(X, y, sample_weight=None, eval_sets=None):
@@ -96,7 +100,7 @@ isin_kernel = cp.ElementwiseKernel(
     isin_code.format('true', 'false'),
 
     'isin_kernel'
-)
+) if CUDA_FOUND else None
 
 isin_pos_kernel = cp.ElementwiseKernel(
     'Q index, raw E nodes, raw R un, uint64 l',
@@ -105,7 +109,7 @@ isin_pos_kernel = cp.ElementwiseKernel(
     isin_code.format('leaf', -1),
 
     'isin_pos_kernel'
-)
+) if CUDA_FOUND else None
 
 
 def isin(a, b, index=None, return_pos=False):
@@ -173,7 +177,7 @@ histogram_kernel_idx = cp.ElementwiseKernel(
 
     """,
 
-    'histogram_kernel_idx')
+    'histogram_kernel_idx') if CUDA_FOUND else None
 
 feature_grouper_kernel = cp.ElementwiseKernel(
     """
@@ -187,7 +191,7 @@ feature_grouper_kernel = cp.ElementwiseKernel(
     padded_col_indexer[col_indexer] = i;
 
     """,
-    'feature_grouper_kernel')
+    'feature_grouper_kernel') if CUDA_FOUND else None
 
 
 def fill_histogram(res, arr, target, nodes, col_indexer, row_indexer, out_indexer):
@@ -342,7 +346,7 @@ loss_kernel = cp.ElementwiseKernel(
 
     """,
 
-    'loss_kernel')
+    'loss_kernel') if CUDA_FOUND else None
 
 
 def calc_loss(grad, hess, nodes_count, lambda_l2=0.1, min_data_in_leaf=10.):
@@ -384,7 +388,7 @@ select_among_feature = cp.ElementwiseKernel(
 
     """,
 
-    'select_among_feature')
+    'select_among_feature') if CUDA_FOUND else None
 
 select_total = cp.ElementwiseKernel(
     """
@@ -408,7 +412,7 @@ select_total = cp.ElementwiseKernel(
 
     """,
 
-    'select_total')
+    'select_total') if CUDA_FOUND else None
 
 
 def get_best_split(loss, col_indexer):
@@ -464,7 +468,7 @@ split_kernel = cp.ElementwiseKernel(
 
     """,
 
-    'split_kernel')
+    'split_kernel') if CUDA_FOUND else None
 
 
 def make_split(nodes, arr, unique_nodes, split_nodes, feat, split, nan_left, return_pos=False):
@@ -520,7 +524,7 @@ apply_values_kernel = cp.ElementwiseKernel(
 
     """,
 
-    'apply_values_kernel')
+    'apply_values_kernel') if CUDA_FOUND else None
 
 
 def apply_values(nodes, group_index, values):
@@ -581,7 +585,7 @@ node_index_kernel = cp.ElementwiseKernel(
 
     """,
 
-    'node_index_kernel')
+    'node_index_kernel') if CUDA_FOUND else None
 
 generic_tree_prediction_leaves_kernel = r'''
     extern "C" __global__
@@ -633,13 +637,13 @@ comp_float = '''
 comp_int = "n_node = ((float)x > nd.y) ? (int)nd.w : (int)nd.z;"
 tree_prediction_leaves_typed_kernels = {
     'float32': cp.RawKernel(generic_tree_prediction_leaves_kernel.format(T='float', TT='float', comp=comp_float),
-                            'tree_prediction_leaves_kernel_float'),
+                            'tree_prediction_leaves_kernel_float') if CUDA_FOUND else None,
     'float64': cp.RawKernel(generic_tree_prediction_leaves_kernel.format(T='double', TT='double', comp=comp_float),
-                            'tree_prediction_leaves_kernel_double'),
+                            'tree_prediction_leaves_kernel_double') if CUDA_FOUND else None,
     'int32': cp.RawKernel(generic_tree_prediction_leaves_kernel.format(T='int', TT='int', comp=comp_int),
-                          'tree_prediction_leaves_kernel_int'),
+                          'tree_prediction_leaves_kernel_int') if CUDA_FOUND else None,
     'int64': cp.RawKernel(generic_tree_prediction_leaves_kernel.format(T='long long', TT='longlong', comp=comp_int),
-                          'tree_prediction_leaves_kernel_longlong')
+                          'tree_prediction_leaves_kernel_longlong') if CUDA_FOUND else None
 }
 
 tree_prediction_values_kernel = cp.RawKernel(
@@ -668,7 +672,7 @@ tree_prediction_values_kernel = cp.RawKernel(
         res[th] = prev_val + new_val;
     }
     ''',
-    'tree_prediction_values_kernel')
+    'tree_prediction_values_kernel') if CUDA_FOUND else None
 
 
 def get_tree_node(arr, feats, val_splits, split, nan_left):
@@ -833,7 +837,7 @@ accumulate_gh_kernel = cp.ElementwiseKernel(
 
     """,
 
-    'accumulate_gh_kernel')
+    'accumulate_gh_kernel') if CUDA_FOUND else None
 
 
 def calc_node_values(grad, hess, nodes, row_indexer, group_index, max_nodes, lr=1, lambda_l2=0.1):

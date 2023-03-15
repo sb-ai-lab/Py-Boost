@@ -1,4 +1,7 @@
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 import logging
 import numpy as np
 
