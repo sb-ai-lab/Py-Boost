@@ -32,6 +32,7 @@ def bce_scorer(y_true, y_pred, sample_weight=None):
     Args:
         y_true: (nobj, nout)
         y_pred: (niter, nobj, nout)
+        sample_weight: (nobj, 1)
 
     Returns:
 
@@ -53,6 +54,7 @@ def mse_scorer(y_true, y_pred, sample_weight=None):
     Args:
         y_true: (nobj, nout)
         y_pred: (niter, nobj, nout)
+        sample_weight: (nobj, 1)
 
     Returns:
 
@@ -74,6 +76,7 @@ def cent_scorer(y_true, y_pred, sample_weight=None):
     Args:
         y_true: (nobj, nout)
         y_pred: (niter, nobj, nout)
+        sample_weight: (nobj, 1)
 
     Returns:
 
@@ -110,7 +113,7 @@ def select_preds(arr, leaves, order):
 
 class AdaptiveESCV(CrossValidation):
     """
-    Cross validation wrapper with built in adaptive early stopping
+    Cross validation wrapper with built-in adaptive early stopping
     """
 
     def __init__(self, base_learner, cluster, iters_to_fit, metric=None, random_state=42, batch_size=10000):
@@ -153,6 +156,8 @@ class AdaptiveESCV(CrossValidation):
             y:
             sample_weight:
             cv:
+            stratify:
+            random_state:
 
         Returns:
 

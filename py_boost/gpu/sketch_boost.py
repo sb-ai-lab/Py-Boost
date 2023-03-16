@@ -7,7 +7,7 @@ from ..multioutput.sketching import FilterSketch, TopOutputsSketch, SVDSketch, R
 
 class SketchBoost(GradientBoosting):
     """
-    Gradient Boosting with built in FilterSketch to handle multioutput tasks. If single output is passed,
+    Gradient Boosting with built-in FilterSketch to handle multioutput tasks. If single output is passed,
     it is handled as usual
     """
 
@@ -80,7 +80,7 @@ class SketchBoost(GradientBoosting):
             sketch = SVDSketch(sketch_outputs, **sketch_params)
 
         elif sketch_method == 'topk':
-            sketch = TopOutputsSketch(sketch_outputs, **sketch_params)
+            sketch = TopOutputsSketch(sketch_outputs)
 
         elif sketch_method == 'rand':
             sketch = RandomSamplingSketch(sketch_outputs, **sketch_params)

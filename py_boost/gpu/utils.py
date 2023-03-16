@@ -596,6 +596,7 @@ generic_tree_prediction_leaves_kernel = r'''
         const int n_features,
         const int x_size,
         const int n_gr,
+        const int n_buffer, 
         int* res)
     {{
         long long th = blockIdx.x * blockDim.x + threadIdx.x;
@@ -607,7 +608,6 @@ generic_tree_prediction_leaves_kernel = r'''
 
         long long x_feat_offset = n_features * i_;
         int tree_offset = gr_subtree_offsets[j_];
-
         int n_node = 0;
         float4 nd;
         {T} x;
@@ -624,7 +624,7 @@ generic_tree_prediction_leaves_kernel = r'''
         }}
 
         // writing result
-        res[i_ * n_gr + j_] = (-n_node - 1);
+        res[i_ * n_buffer + j_] = (-n_node - 1);
     }}
     '''
 
@@ -892,6 +892,7 @@ def set_leaf_values(feats, split):
 
     Args:
         feats: np.ndarray of tree's split features, shape (n_groups, max_nodes)
+        split: shape (ngroups, max_nodes, 2) - node indices corresponding left/right split for the current node
 
     Returns:
         np.ndarray of leaf indices
@@ -902,17 +903,21 @@ def set_leaf_values(feats, split):
     for i in range(feats.shape[0]):
 
         acc = 0
-
-        for j in range(feats.shape[1]):
-
-            if split[i, j, 0] != -1:
-
-                for k in range(2):
-                    n = split[i, j, k]
-                    if feats[i, n] == -1:
-                        leaves[n, i] = acc
-                        acc += 1
-
+        
+        nodes = [np.int32(0), ]
+        
+        while len(nodes) > 0:
+            new_nodes = []
+            
+            for n in nodes:
+                if feats[i, n] == -1:
+                    leaves[n, i] = acc
+                    acc += 1
+                else:
+                    new_nodes.extend(split[i, n])
+                    
+            nodes = new_nodes
+        
         max_leaves = max(max_leaves, acc)
 
     return leaves, max_leaves

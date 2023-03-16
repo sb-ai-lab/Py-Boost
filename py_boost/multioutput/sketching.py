@@ -5,8 +5,6 @@ try:
 except Exception:
     pass
 
-from copy import deepcopy
-
 try:
     from cuml import TruncatedSVD
 except ImportError:

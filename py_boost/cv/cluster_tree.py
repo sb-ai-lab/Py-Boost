@@ -6,7 +6,7 @@ from ..quantization.base import QuantileQuantizer
 
 
 def cluster_grow_tree(tree, group, arr, grad, hess, row_indexer, col_indexer, params):
-    """Graw tree for advanced prunning
+    """Graw tree for advanced pruning
 
     Args:
         tree:

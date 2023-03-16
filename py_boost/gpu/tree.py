@@ -189,17 +189,12 @@ class Tree:
         Returns:
 
         """
-        if self._debug:
-            for attr in ['values', 'test_format', 'test_format_offsets', 'group_index',
-                         'feature_importance_gain', 'feature_importance_split']:
-                arr = getattr(self, attr)
-                setattr(self, attr, cp.asarray(arr))
-            return
-
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
                      'test_format', 'test_format_offsets', 'feature_importance_gain', 'feature_importance_split']:
             arr = getattr(self, attr)
-            setattr(self, attr, cp.asarray(arr))
+            
+            if type(arr) is np.ndarray:
+                setattr(self, attr, cp.asarray(arr))
 
     def to_cpu(self):
         """Move tree data to the CPU memory
@@ -207,17 +202,11 @@ class Tree:
         Returns:
 
         """
-        if self._debug:
-            for attr in ['values', 'test_format', 'test_format_offsets', 'group_index',
-                         'feature_importance_gain', 'feature_importance_split']:
-                arr = getattr(self, attr)
-                setattr(self, attr, cp.asarray(arr))
-            return
-
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
                      'test_format', 'test_format_offsets', 'feature_importance_gain', 'feature_importance_split']:
             arr = getattr(self, attr)
-            if type(arr) is not np.ndarray:
+            
+            if type(arr) is cp.ndarray:
                 setattr(self, attr, arr.get())
 
     def _predict_node_deprecated(self, X):
@@ -229,6 +218,9 @@ class Tree:
         Returns:
 
         """
+        if self.feats is None:
+            raise Exception('To use _deprecated funcs pass debug=True to .reformat') 
+            
         assert type(self.feats) is cp.ndarray, 'Should be moved to GPU first. Call .to_device()'
         nodes = get_tree_node(X, self.feats, self.val_splits, self.split, self.nans)
         return nodes
@@ -241,10 +233,10 @@ class Tree:
 
         Returns:
             cp.ndarray of nodes
-        """
+        """ 
         return apply_values(nodes, self.group_index, self.values)
 
-    def predict_leaf_from_nodes(self, nodes):
+    def _predict_leaf_from_nodes_deprecated(self, nodes):
         """Predict leaf indices from the nodes indices (Use predict_leaf() method if you need to predict leaves)
 
         Args:
@@ -264,9 +256,7 @@ class Tree:
         Returns:
             cp.ndarray of predictions
         """
-        if self._debug:
-            raise Exception("Deprecated functions aren't available in debug mode")
-        return self._predict_from_nodes_deprecated(self.predict_leaf_from_nodes(self._predict_node_deprecated(X)))
+        return self._predict_from_nodes_deprecated(self._predict_leaf_from_nodes_deprecated(self._predict_node_deprecated(X)))
 
     def _predict_leaf_deprecated(self, X):
         """(DEPRECATED) Predict leaf indices from the feature matrix X
@@ -276,10 +266,8 @@ class Tree:
 
         Returns:
             cp.ndarray of leaves
-        """
-        if self._debug:
-            raise Exception("Deprecated functions aren't available in debug mode")
-        return self.predict_leaf_from_nodes(self._predict_node_deprecated(X))
+        """ 
+        return self._predict_leaf_from_nodes_deprecated(self._predict_node_deprecated(X))
 
     def predict_leaf(self, X, pred_leaves=None):
         """Predict leaf indexes from the feature matrix X
@@ -293,8 +281,13 @@ class Tree:
 
         """
         # check if buffer is None and X on GPU
-        if type(X) is not cp.ndarray:
-            raise Exception("X must be type of cp.ndarray (located on gpu)")
+        assert type(X) is cp.ndarray, "X must be type of cp.ndarray (located on gpu)"
+        
+        dt = str(X.dtype)
+        
+        assert dt in tree_prediction_leaves_typed_kernels, \
+            f"X array must be of type: {list(tree_prediction_leaves_typed_kernels.keys())}"
+        
         if pred_leaves is None:
             pred_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
 
@@ -304,16 +297,14 @@ class Tree:
         blocks = sz // threads
         if sz % threads != 0:
             blocks += 1
-
-        dt = str(X.dtype)
-        if dt not in tree_prediction_leaves_typed_kernels.keys():
-            raise TypeError(f"X array must be of type: {list(tree_prediction_leaves_typed_kernels.keys())}")
+        
         tree_prediction_leaves_typed_kernels[dt]((blocks,), (threads,), ((X,
                                                                           self.test_format,
                                                                           self.test_format_offsets,
                                                                           X.shape[1],
                                                                           X.shape[0],
                                                                           self.ngroups,
+                                                                          pred_leaves.shape[1],
                                                                           pred_leaves)))
         return pred_leaves
 
@@ -329,11 +320,9 @@ class Tree:
             pred: cp.ndarray, prediction array
 
         """
-        # check if buffers are None and X on GPU
-        if type(X) is not cp.ndarray:
-            raise TypeError("X must be type of cp.ndarray (located on GPU)")
+        # check if buffers are None
         if pred is None:
-            pred = cp.empty((X.shape[0], self.nout), dtype=cp.float32)
+            pred = cp.zeros((X.shape[0], self.nout), dtype=cp.float32)
         if pred_leaves is None:
             pred_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
 
@@ -353,12 +342,11 @@ class Tree:
                                                                self.values,
                                                                self.nout,
                                                                X.shape[0],
-                                                               self.ngroups,
+                                                               pred_leaves.shape[1],
                                                                pred)))
         return pred
 
     def reformat(self, nfeats, debug):
-        self._debug = debug
         """Creates new internal format of the tree for faster inference
         
         Args:
@@ -372,16 +360,32 @@ class Tree:
 
         # memory allocation for new tree array
         gr_subtree_offsets = np.zeros(n_gr, dtype=np.int32)
+        check_empty = []
         total_size = 0
         for i in range(n_gr):
-            total_size += int((self.feats[i] >= 0).sum())
+            curr_size = int((self.feats[i] >= 0).sum())
+            # add special case handling - single leaf, no splits
+            check_empty.append(curr_size == 0)
+            curr_size = max(1, curr_size)
+            total_size += curr_size
+            
             if i < n_gr - 1:
                 gr_subtree_offsets[i + 1] = total_size
         nf = np.zeros(total_size * 4, dtype=np.float32)
 
         # reformatting the tree
         for i in range(n_gr):
+            # handle special case - single leaf, no splits - make a pseudo split node
+            if check_empty[i]:
+                nf[4 * gr_subtree_offsets[i]] = 1.
+                nf[4 * gr_subtree_offsets[i] + 1] = 0.
+                nf[4 * gr_subtree_offsets[i] + 2] = -1.
+                nf[4 * gr_subtree_offsets[i] + 3] = -1.
+                
+                continue
+            
             q = [(0, 0)]
+            
             while len(q) != 0:  # BFS in tree
                 n_old, n_new = q[0]
                 if not self.nans[i][n_old]:
@@ -420,11 +424,9 @@ class Tree:
         sl = self.feats >= 0
         np.add.at(self.feature_importance_split, self.feats[sl], 1)
 
-        # self.group_index = self.group_index.astype('int32')
-
-        if debug is True:
+        if not debug:
             for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'leaves']:
-                delattr(self, attr)
+                setattr(self, attr, None)
 
 
 class DepthwiseTreeBuilder:
