@@ -156,7 +156,7 @@ class BCELoss(Loss):
 
 def softmax(x, clip_val=1e-5):
     
-    xp = np if type(y_pred) is np.ndarray else cp
+    xp = np if type(x) is np.ndarray else cp
     exp_p = xp.exp(x - x.max(axis=1, keepdims=True))
 
     return xp.clip(exp_p / exp_p.sum(axis=1, keepdims=True), clip_val, 1 - clip_val)
