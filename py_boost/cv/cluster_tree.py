@@ -157,9 +157,10 @@ class ClusterCandidates(Ensemble):
     Ensemble of cluster candidates
     """
 
-    def __init__(self, depth_range=range(1, 7), min_data_in_leaf=100):
+    def __init__(self, depth_range=range(1, 7), min_data_in_leaf=100, debug=False):
         super().__init__()
 
+        self._debug = debug
         self.depth_range = depth_range
         self.min_data_in_leaf = min_data_in_leaf
         self.max_clust = 2 ** max(depth_range)
@@ -184,7 +185,10 @@ class ClusterCandidates(Ensemble):
 
         for d in self.depth_range:
             builder = ClusterTreeBuilder(borders, max_depth=d, min_data_in_leaf=self.min_data_in_leaf, max_bin=max_bin)
-            self.models.append(builder.build_tree(X_cp, y))
+
+            tree = builder.build_tree(X_cp, y)
+            tree.reformat(nfeats=X_cp.shape[1], debug=self._debug)
+            self.models.append(tree)
 
         self.base_score = np.zeros((1,), dtype=np.float32)
 

@@ -1,6 +1,9 @@
 """Defines sketching strategies to simplify multioutput scoring function calculation"""
 
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 
 from copy import deepcopy
 
