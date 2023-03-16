@@ -422,7 +422,7 @@ class Tree:
 
         # self.group_index = self.group_index.astype('int32')
 
-        if debug is True:
+        if not debug:
             for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'leaves']:
                 delattr(self, attr)
 
