@@ -154,7 +154,9 @@ class BCELoss(Loss):
         return metric_alias[name]
 
 
-def softmax(x, clip_val=1e-5, xp=cp):
+def softmax(x, clip_val=1e-5):
+    
+    xp = np if type(y_pred) is np.ndarray else cp
     exp_p = xp.exp(x - x.max(axis=1, keepdims=True))
 
     return xp.clip(exp_p / exp_p.sum(axis=1, keepdims=True), clip_val, 1 - clip_val)
@@ -203,8 +205,8 @@ class CrossEntropyLoss(Loss):
         return grad, hess
 
     def postprocess_output(self, y_pred):
-        xp = np if type(y_pred) is np.ndarray else cp
-        return softmax(y_pred, self.clip_value, xp)
+        
+        return softmax(y_pred, self.clip_value)
 
     def preprocess_input(self, y_true):
         return y_true[:, 0].astype(cp.int32)

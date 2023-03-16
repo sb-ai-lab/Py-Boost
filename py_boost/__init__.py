@@ -18,29 +18,34 @@ try:
     from .gpu.sketch_boost import SketchBoost
     from .gpu.losses.losses import Loss
     from .gpu.losses.metrics import Metric
+    from .callbacks.callback import Callback
+    __all__ = [
+
+        'GradientBoosting',
+        'SketchBoost',
+        'Callback',
+        'Loss',
+        'Metric',
+        'callbacks',
+        'gpu',
+        'multioutput',
+        'sampling',
+        'utils'
+
+    ]
+    
 except Exception:
     warnings.warn('No Nvidia GPU in system!')
+    __all__ = []
 
-
-from .callbacks.callback import Callback
 from .utils.tl_wrapper import TLPredictor, TLCompiledPredictor
 
-__all__ = [
+__all__.extend([
 
-    'GradientBoosting',
-    'SketchBoost',
     'TLPredictor',
     'TLCompiledPredictor',
-    'Callback',
-    'Loss',
-    'Metric',
-    'callbacks',
-    'gpu',
-    'multioutput',
-    'sampling',
-    'utils'
 
-]
+])
 
 try:
     import importlib.metadata as importlib_metadata
