@@ -189,17 +189,12 @@ class Tree:
         Returns:
 
         """
-        if self._debug:
-            for attr in ['values', 'test_format', 'test_format_offsets', 'group_index',
-                         'feature_importance_gain', 'feature_importance_split']:
-                arr = getattr(self, attr)
-                setattr(self, attr, cp.asarray(arr))
-            return
-
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
                      'test_format', 'test_format_offsets', 'feature_importance_gain', 'feature_importance_split']:
             arr = getattr(self, attr)
-            setattr(self, attr, cp.asarray(arr))
+            
+            if type(arr) is np.ndarray:
+                setattr(self, attr, cp.asarray(arr))
 
     def to_cpu(self):
         """Move tree data to the CPU memory
@@ -207,17 +202,11 @@ class Tree:
         Returns:
 
         """
-        if self._debug:
-            for attr in ['values', 'test_format', 'test_format_offsets', 'group_index',
-                         'feature_importance_gain', 'feature_importance_split']:
-                arr = getattr(self, attr)
-                setattr(self, attr, cp.asarray(arr))
-            return
-
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
                      'test_format', 'test_format_offsets', 'feature_importance_gain', 'feature_importance_split']:
             arr = getattr(self, attr)
-            if type(arr) is not np.ndarray:
+            
+            if type(arr) is cp.ndarray:
                 setattr(self, attr, arr.get())
 
     def _predict_node_deprecated(self, X):
@@ -229,6 +218,9 @@ class Tree:
         Returns:
 
         """
+        if self.feats is None:
+            raise Exception('To use _deprecated funcs pass debug=True to .reformat') 
+            
         assert type(self.feats) is cp.ndarray, 'Should be moved to GPU first. Call .to_device()'
         nodes = get_tree_node(X, self.feats, self.val_splits, self.split, self.nans)
         return nodes
@@ -241,10 +233,10 @@ class Tree:
 
         Returns:
             cp.ndarray of nodes
-        """
+        """ 
         return apply_values(nodes, self.group_index, self.values)
 
-    def predict_leaf_from_nodes(self, nodes):
+    def _predict_leaf_from_nodes_deprecated(self, nodes):
         """Predict leaf indices from the nodes indices (Use predict_leaf() method if you need to predict leaves)
 
         Args:
@@ -264,9 +256,7 @@ class Tree:
         Returns:
             cp.ndarray of predictions
         """
-        if self._debug:
-            raise Exception("Deprecated functions aren't available in debug mode")
-        return self._predict_from_nodes_deprecated(self.predict_leaf_from_nodes(self._predict_node_deprecated(X)))
+        return self._predict_from_nodes_deprecated(self._predict_leaf_from_nodes_deprecated(self._predict_node_deprecated(X)))
 
     def _predict_leaf_deprecated(self, X):
         """(DEPRECATED) Predict leaf indices from the feature matrix X
@@ -276,10 +266,8 @@ class Tree:
 
         Returns:
             cp.ndarray of leaves
-        """
-        if self._debug:
-            raise Exception("Deprecated functions aren't available in debug mode")
-        return self.predict_leaf_from_nodes(self._predict_node_deprecated(X))
+        """ 
+        return self._predict_leaf_from_nodes_deprecated(self._predict_node_deprecated(X))
 
     def predict_leaf(self, X, pred_leaves=None):
         """Predict leaf indexes from the feature matrix X
@@ -358,7 +346,6 @@ class Tree:
         return pred
 
     def reformat(self, nfeats, debug):
-        self._debug = debug
         """Creates new internal format of the tree for faster inference
         
         Args:
@@ -420,11 +407,9 @@ class Tree:
         sl = self.feats >= 0
         np.add.at(self.feature_importance_split, self.feats[sl], 1)
 
-        # self.group_index = self.group_index.astype('int32')
-
         if not debug:
             for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'leaves']:
-                delattr(self, attr)
+                setattr(self, attr, None)
 
 
 class DepthwiseTreeBuilder:
