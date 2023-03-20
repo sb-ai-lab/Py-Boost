@@ -15,7 +15,9 @@ Py-boost is a Python-based gradient boosting library which aims at overcoming th
 
 **Simple**. Py-boost is a simplified gradient boosting library but it supports all main features and hyperparameters available in other implementations.
 
-**Fast with GPU**. Despite the fact that Py-boost is written in Python, it works only on GPU and uses Python GPU libraries such as CuPy and Numba.
+**Fast with GPU**. Despite the fact that Py-boost is written in Python, it works only on GPU and uses Python GPU libraries such as `CuPy` and `Numba`.
+
+**Efficient inference**. Since v0.4 Py-Boost is able to perform the efficient inference of tree ensembles on GPU. Moreover, ones your model is trained on GPU, it could be converted to perform the inference on CPU only machine via converting to the [treelite](https://treelite.readthedocs.io/) format with build-in wrapper (limitation - model should be trained with `target_splitter='Single'`, which is the default). 
 
 **Easy to customize**. Py-boost can be easily customized even if one is not familiar with GPU programming (just replace np with cp).  What can be customized? Almost everuthing via custom callbacks. Examples: Row/Col sampling strategy, Training control, Losses/metrics, Multioutput handling strategy, Anything via custom callbacks
 
