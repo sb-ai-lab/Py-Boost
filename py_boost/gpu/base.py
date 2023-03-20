@@ -110,7 +110,6 @@ class Ensemble:
         Returns:
             prediction, 2d np.ndarray of float32, shape (n_data, n_outputs)
         """
-
         self.to_device()
         prediction = pinned_array(np.empty((X.shape[0], self.base_score.shape[0]), dtype=np.float32))
 
@@ -157,12 +156,6 @@ class Ensemble:
         """
         if iterations is None:
             iterations = list(range(len(self.models)))
-        if len(iterations) == 0:
-            return np.empty(0, dtype=np.float32)
-        if min(iterations) < 0 or max(iterations) >= len(self.models):
-            raise Exception("Invalid stage numbers")
-        if all(isinstance(el, int) for el in iterations) is False:
-            raise Exception("Stage numbers must be int type")
 
         self.to_device()
 
@@ -212,13 +205,7 @@ class Ensemble:
         # Iteration list validation
         if iterations is None:
             iterations = list(range(len(self.models)))
-        if len(iterations) == 0:
-            return np.empty(0, dtype=np.float32)
-        if min(iterations) < 0 or max(iterations) >= len(self.models):
-            raise Exception("Invalid stage numbers")
-        if all(isinstance(el, int) for el in iterations) is False:
-            raise Exception("Stage numbers must be int type")
-
+            
         self.to_device()
         prediction = pinned_array(np.empty((len(iterations), X.shape[0], self.base_score.shape[0]), dtype=np.float32))
 
@@ -287,21 +274,21 @@ class Ensemble:
         Returns:
             importance: np.ndarray 1d of float32, shape (n_features)
         """
-        if imp_type not in ['gain', 'split']:
-            raise ValueError("Importance type should be 'gain' or 'split'")
+        assert imp_type in ['gain', 'split'], "Importance type should be 'gain' or 'split'"
+            
         importance = np.zeros(self.nfeats, dtype=np.float32)
 
         for tree in self.models:
             if imp_type == 'split':
-                if type(tree.test_importance_split) is not np.ndarray:
-                    importance += tree.test_importance_split.get()
+                if type(tree.feature_importance_split) is not np.ndarray:
+                    importance += tree.feature_importance_split.get()
                 else:
-                    importance += tree.test_importance_split
+                    importance += tree.feature_importance_split
             else:
-                if type(tree.test_importance_gain) is not np.ndarray:
-                    importance += tree.test_importance_gain.get()
+                if type(tree.feature_importance_gain) is not np.ndarray:
+                    importance += tree.feature_importance_gain.get()
                 else:
-                    importance += tree.test_importance_gain
+                    importance += tree.feature_importance_gain
 
         return importance
 
@@ -318,23 +305,20 @@ class Ensemble:
             prediction, np.ndarray 2d of int32, shape (n_iterations, n_data, n_groups).
             For n_groups explanation check Tree class
         """
-        if batch_size <= 0 or not isinstance(batch_size, int):
-            raise ValueError("Batch size must be a positive integer")
-
+        assert batch_size > 0, 'Batch size must be a positive integer'
+        
         if iterations is None:
-            iterations = list(range(len(self.models)))
-        if len(iterations) == 0:
-            return np.empty(0, dtype=np.float32)
-        if min(iterations) < 0 or max(iterations) >= len(self.models):
-            raise ValueError("Invalid stage numbers")
-        if all(isinstance(el, int) for el in iterations) is False:
-            raise ValueError("Stage numbers must be int type")
-        if len(set(iterations)) != len(iterations):
-            raise ValueError("Duplicate values in stages are not allowed")
+            iterations = np.arange(len(self.models))
+        else:
+            iterations = np.array(iterations, dtype=np.int64)
+            
+        assert len(iterations) > 0, 'Iterations are empty sequence'
+        assert (max(iterations) < len(self.models)) and (min(iterations) >= 0), 'Invalid stage numbers'
+        assert len(np.unique(iterations)) == len(iterations), 'Duplicate values in stages are not allowed'
 
         check_grp = np.unique([x.ngroups for x in self.models])
-        if check_grp.shape[0] > 1:
-            raise ValueError('Different number of groups in trees')
+        assert len(check_grp) == 1, 'Different number of groups in trees'
+        
         ngroups = check_grp[0]
 
         self.to_device()
@@ -428,13 +412,9 @@ class Ensemble:
         Returns:
             prediction: np.ndarray 2d of float32, shape (n_data, n_outputs)
         """
-        if batch_size <= 0 or not isinstance(batch_size, int):
-            raise ValueError("Batch size must be a positive integer")
-
-        check_grp = np.unique([x.ngroups for x in self.models])
-        if check_grp.shape[0] > 1:
-            raise ValueError('Different number of groups in trees')
-        ngroups = check_grp[0]
+        assert batch_size > 0, 'Batch size must be a positive integer'
+        
+        ngroups = max((x.ngroups for x in self.models))
         n_out = self.base_score.shape[0]
 
         self.to_device()
@@ -539,26 +519,18 @@ class Ensemble:
         Returns:
             prediction, np.ndarray 2d of float32, shape (n_iterations, n_data, n_out)
         """
-        if batch_size <= 0 or not isinstance(batch_size, int):
-            raise ValueError("Batch size must be a positive integer")
-
+        assert batch_size > 0, 'Batch size must be a positive integer'
+        
         if iterations is None:
-            iterations = list(range(len(self.models)))
-        if len(iterations) == 0:
-            return np.empty(0, dtype=np.float32)
-        if min(iterations) < 0 or max(iterations) >= len(self.models):
-            raise ValueError("Invalid stage numbers")
-        if all(isinstance(el, int) for el in iterations) is False:
-            raise ValueError("Stage numbers must be int type")
-        if len(set(iterations)) != len(iterations):
-            raise ValueError("Duplicate values in stages are not allowed")
-        if sorted(iterations) != iterations:
-            raise ValueError("Stages in iterations list should be sorted in ascending order beforehand")
-
-        check_grp = np.unique([x.ngroups for x in self.models])
-        if check_grp.shape[0] > 1:
-            raise ValueError('Different number of groups in trees')
-        n_groups = check_grp[0]
+            iterations = np.arange(len(self.models))
+        else:
+            iterations = np.array(iterations, dtype=np.int64)
+            
+        assert len(iterations) > 0, 'Iterations are empty sequence'
+        assert (max(iterations) < len(self.models)) and (min(iterations) >= 0), 'Invalid stage numbers'
+        assert len(np.unique(iterations)) == len(iterations), 'Duplicate values in stages are not allowed'
+        
+        ngroups = max((x.ngroups for x in self.models))
         n_out = self.base_score.shape[0]
 
         self.to_device()
@@ -568,11 +540,12 @@ class Ensemble:
             if type(X) is not cp.ndarray:
                 is_on_gpu = False
                 X = cp.array(X, dtype=cp.float32)
-                pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=np.float32)
+                pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=cp.float32)
             else:
                 pred_full = cp.empty((len(iterations), X.shape[0], n_out), dtype=cp.float32)
+                
             gpu_pred = cp.empty((X.shape[0], n_out), dtype=cp.float32)
-            gpu_pred_leaves = cp.empty((X.shape[0], n_groups), dtype=cp.int32)
+            gpu_pred_leaves = cp.empty((X.shape[0], ngroups), dtype=cp.int32)
 
             gpu_pred[:] = self.base_score
             next_out = 0
@@ -597,7 +570,7 @@ class Ensemble:
         gpu_pred = [cp.empty((batch_size, n_out), dtype=cp.float32) for _ in range(n_streams)]
 
         # temp buffer for leaves
-        gpu_pred_leaves = [cp.empty((batch_size, n_groups), dtype=cp.int32) for _ in range(n_streams)]
+        gpu_pred_leaves = [cp.empty((batch_size, ngroups), dtype=cp.int32) for _ in range(n_streams)]
 
         # batch allocation
         cpu_batch = [pinned_array(np.empty(X[0:batch_size].shape, dtype=np.float32)) for _ in range(n_streams)]

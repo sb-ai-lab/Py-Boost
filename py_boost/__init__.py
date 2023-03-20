@@ -35,7 +35,7 @@ try:
     ]
     
 except Exception:
-    warnings.warn('No Nvidia GPU in system!')
+    warnings.warn('No Nvidia GPU detected! Only treelite inference on CPU is available')
     __all__ = []
 
 from .utils.tl_wrapper import TLPredictor, TLCompiledPredictor

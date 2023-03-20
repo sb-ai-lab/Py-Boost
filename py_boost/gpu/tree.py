@@ -281,8 +281,13 @@ class Tree:
 
         """
         # check if buffer is None and X on GPU
-        if type(X) is not cp.ndarray:
-            raise Exception("X must be type of cp.ndarray (located on gpu)")
+        assert type(X) is cp.ndarray, "X must be type of cp.ndarray (located on gpu)"
+        
+        dt = str(X.dtype)
+        
+        assert dt in tree_prediction_leaves_typed_kernels, \
+            f"X array must be of type: {list(tree_prediction_leaves_typed_kernels.keys())}"
+        
         if pred_leaves is None:
             pred_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
 
@@ -292,16 +297,14 @@ class Tree:
         blocks = sz // threads
         if sz % threads != 0:
             blocks += 1
-
-        dt = str(X.dtype)
-        if dt not in tree_prediction_leaves_typed_kernels.keys():
-            raise TypeError(f"X array must be of type: {list(tree_prediction_leaves_typed_kernels.keys())}")
+        
         tree_prediction_leaves_typed_kernels[dt]((blocks,), (threads,), ((X,
                                                                           self.test_format,
                                                                           self.test_format_offsets,
                                                                           X.shape[1],
                                                                           X.shape[0],
                                                                           self.ngroups,
+                                                                          pred_leaves.shape[1],
                                                                           pred_leaves)))
         return pred_leaves
 
@@ -317,11 +320,9 @@ class Tree:
             pred: cp.ndarray, prediction array
 
         """
-        # check if buffers are None and X on GPU
-        if type(X) is not cp.ndarray:
-            raise TypeError("X must be type of cp.ndarray (located on GPU)")
+        # check if buffers are None
         if pred is None:
-            pred = cp.empty((X.shape[0], self.nout), dtype=cp.float32)
+            pred = cp.zeros((X.shape[0], self.nout), dtype=cp.float32)
         if pred_leaves is None:
             pred_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
 
@@ -341,7 +342,7 @@ class Tree:
                                                                self.values,
                                                                self.nout,
                                                                X.shape[0],
-                                                               self.ngroups,
+                                                               pred_leaves.shape[1],
                                                                pred)))
         return pred
 
@@ -359,16 +360,32 @@ class Tree:
 
         # memory allocation for new tree array
         gr_subtree_offsets = np.zeros(n_gr, dtype=np.int32)
+        check_empty = []
         total_size = 0
         for i in range(n_gr):
-            total_size += int((self.feats[i] >= 0).sum())
+            curr_size = int((self.feats[i] >= 0).sum())
+            # add special case handling - single leaf, no splits
+            check_empty.append(curr_size == 0)
+            curr_size = max(1, curr_size)
+            total_size += curr_size
+            
             if i < n_gr - 1:
                 gr_subtree_offsets[i + 1] = total_size
         nf = np.zeros(total_size * 4, dtype=np.float32)
 
         # reformatting the tree
         for i in range(n_gr):
+            # handle special case - single leaf, no splits - make a pseudo split node
+            if check_empty[i]:
+                nf[4 * gr_subtree_offsets[i]] = 1.
+                nf[4 * gr_subtree_offsets[i] + 1] = 0.
+                nf[4 * gr_subtree_offsets[i] + 2] = -1.
+                nf[4 * gr_subtree_offsets[i] + 3] = -1.
+                
+                continue
+            
             q = [(0, 0)]
+            
             while len(q) != 0:  # BFS in tree
                 n_old, n_new = q[0]
                 if not self.nans[i][n_old]:
