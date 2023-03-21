@@ -206,7 +206,6 @@ class TLCompiledPredictor:
         self.nthread = nthread
         self.libpath = None
         self.set_libpath(libpath)
-        self.predictor = None
 
         self.postprocess_fn = self._default_postprocess_fn
         if postprocess_fn is not None:
