@@ -688,13 +688,13 @@ tree_prediction_leaves_typed_kernels = {
 }
 tree_prediction_leaves_typed_kernels_f = {
     'float32': cp.RawKernel(generic_tree_prediction_leaves_kernel_f.format(T='float', TT='float', comp=comp_float),
-                            'tree_prediction_leaves_kernel_float') if CUDA_FOUND else None,
+                            'tree_prediction_leaves_kernel_f_float') if CUDA_FOUND else None,
     'float64': cp.RawKernel(generic_tree_prediction_leaves_kernel_f.format(T='double', TT='double', comp=comp_float),
-                            'tree_prediction_leaves_kernel_double') if CUDA_FOUND else None,
+                            'tree_prediction_leaves_kernel_f_double') if CUDA_FOUND else None,
     'int32': cp.RawKernel(generic_tree_prediction_leaves_kernel_f.format(T='int', TT='int', comp=comp_int),
-                          'tree_prediction_leaves_kernel_int') if CUDA_FOUND else None,
+                          'tree_prediction_leaves_kernel_f_int') if CUDA_FOUND else None,
     'int64': cp.RawKernel(generic_tree_prediction_leaves_kernel_f.format(T='long long', TT='longlong', comp=comp_int),
-                          'tree_prediction_leaves_kernel_longlong') if CUDA_FOUND else None
+                          'tree_prediction_leaves_kernel_f_longlong') if CUDA_FOUND else None
 }
 
 tree_prediction_values_kernel = cp.RawKernel(
