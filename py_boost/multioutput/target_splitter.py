@@ -1,6 +1,9 @@
 """Strategies to splitting multiple outputs by different trees"""
 
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 
 from ..callbacks.callback import Callback
 
@@ -46,8 +49,8 @@ class SingleSplitter(Callback):
 
 
 class RandomGroupsSplitter(SingleSplitter):
-    """Random Groups Splitter, means all outputs will be randomly grouped at the each iteration.
-    Single tree will be created for the each group.
+    """Random Groups Splitter, means all outputs will be randomly grouped at each iteration.
+    Single tree will be created for each group.
     """
 
     def __init__(self, ngroups=2):

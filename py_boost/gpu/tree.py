@@ -1,15 +1,19 @@
 """Decision trees building and inference"""
 
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 import numpy as np
 
 from .utils import apply_values, depthwise_grow_tree, get_tree_node, set_leaf_values, calc_node_values
+from .utils import tree_prediction_leaves_typed_kernels, tree_prediction_values_kernel
 
 
 class Tree:
     """This class initializes an empty tree structure, implements methods to set tree values and single tree inference.
     The instance of this object represents the actual boosting step, but not the single tree!
-    Actual amount of trees in the instance (at each boosting step) is defined by ngroups argument. What does it mean:
+    Actual amount of trees in the instance (at each boosting step) is defined by ngroups argument. What it means:
     Assume you have 5 class classification task, so you model output size equals 5. Possible cases here:
         - Build single decision tree that outputs a vector of 5 values. In this case ngroups eq. 1
         - Build 5 decision trees, each tree predict a value for its own class (one-vs-all).
@@ -26,11 +30,68 @@ class Tree:
         split, shape (ngroups, max_nodes, 2) - node indices corresponding left/right split for the current node
 
     Trees structure defines single node id value for each object
-    Values assigned to the outpus are defined by arrays:
-        grouop_index, shape (nout, ). Defines the group id for predicting each output
+    Values assigned to the outputs are defined by arrays:
+        group_index, shape (nout, ). Defines the group id for predicting each output
         values, shape (max_nodes, nout). Define output value for each node/output
         leaves, shape (max_leaves, ngroups). Assigns the leaf index to the terminal nodes
 
+    During the fit stage, the format described above is used.
+    After fitting, additional reformatting occurs that converts the tree to another format to achieve faster inference:
+    - Sub-trees for each group are stored in one array named "test_format":
+        [gr0_node0, ..., gr0_nodeN, gr1_node0, ..., gr1_nodeM, gr2_node0, ..., gr2_nodeK, gr3_node0, ...]
+    - Each node in new formatted tree consists of 4 fields:
+        [feature_index, split_value, left_node_index, right_node_index],
+        feature_index - feature index to use for the split in each node.
+        split_value - threshold to compare when choosing the next node if feature value is not NaN
+        left_node_index - index of the left child in "test_format" array
+        right_node_index - index of the right child in "test_format" array
+    - The size of "test_format" array equals to the sum of all nodes in all subtrees except leaves multiplied by 4.
+        Multiplication by 4 occurs because each node consists of the 4 fields described above.
+        Examples:
+            test_format[0 * 4] == test_format[0] - yields feature_index for node with index 0.
+            test_format[0 * 4 + 1] == test_format[1] - yields split_value for node with index 0.
+            test_format[0 * 4 + 2] == test_format[2] - yields left_node_index for node with index 0.
+            test_format[0 * 4 + 3] == test_format[3] - yields right_node_index for node with index 0.
+            test_format[1 * 4] == test_format[4]  - yields feature_index for node with index 1.
+            test_format[1 * 4 + 1] == test_format[5] - yields split_value for node with index 1.
+            test_format[1 * 4 + 2] == test_format[6] - yields left_node_index for node with index 1.
+            test_format[1 * 4 + 3] == test_format[7] - yields right_node_index for node with index 1.
+            test_format[2 * 4] == test_format[8]  - yields feature_index for node with index 2.
+            ...
+            test_format[79 * 4] == test_format[316]  - yields feature_index for node with index 79.
+            test_format[79 * 4 + 1] == test_format[317] - yields split_value for node with index 79.
+            test_format[79 * 4 + 2] == test_format[318] - yields left_node_index for node with index 79.
+            test_format[79 * 4 + 3] == test_format[319] - yields right_node_index for node with index 79.
+            ...
+    - The sign of the feature_index value shows the behavior in case of feature == NaN (split to the left/right),
+        to the value written in feature_index an extra "1" is added to deal with zero.
+        Examples:
+            feature_index == 8, positive value means that tree follows to the left in case of NaN in feature,
+                the real feature index is calculated as follows: abs(8) - 1 = 7.
+            feature_index == -19, negative value means that tree follows to the right in case of NaN in feature,
+                the real feature index is calculated as follows: abs(-19) - 1 = 18.
+            feature_index == 0, impossible due to construction algorithm.
+    - If left_node_index/right_node_index is negative, it means that it shows index in the values array;
+        In case of a negative value, an extra "1" is added to deal with zero.
+        Examples:
+            left_node_index == 8, non-negative value means that left child node is stored in "test_format" with index 8;
+            left_node_index == -13, means that left child is a leaf, the index in "values" array for that leaf can
+                be calculated as follows: abs(-13) - 1 = 12. Thus, index in "values" array is 12.
+    - All subtrees are stored in one array, so an additional array of indexes where each subtree is starting
+        is required (index of the subtree roots), array "gr_subtree_offsets" stores these indexes,
+        size of "gr_subtree_offsets" equals to number of groups in the tree (number of subtrees).
+        Example:
+            gr_subtree_offsets == [0, 56, 183], means that tree has 3 subtrees (3 groups).
+            The first subtree has its root as node with index 0;
+            The second subtree has its root as node with index 56;
+            The third subtree has its root as node with index 183.
+            Example how to access the values of the root node in the second subtree:
+                test_format[56 * 4] == test_format[224]  - yields feature_index for the root of the second subtree;
+                test_format[56 * 4 + 1] == test_format[225] - yields split_value for the root of the second subtree;
+                test_format[56 * 4 + 2] == test_format[226] - yields left_node_index for the root of the second subtree;
+                test_format[56 * 4 + 3] == test_format[227] - yields right_node_index for the root of the second subtree
+    - Two fields, 'feature_importance_gain' and 'feature_importance_split', store feature importance arrays
+        and describe the fitted tree accordingly.
     """
 
     def __init__(self, max_nodes, nout, ngroups):
@@ -57,6 +118,13 @@ class Tree:
         self.group_index = None
         self.leaves = None
         self.max_leaves = None
+
+        self.feature_importance_gain = None
+        self.feature_importance_split = None
+
+        self._debug = None
+        self.test_format = None
+        self.test_format_offsets = None
 
     def set_nodes(self, group, unique_nodes, new_nodes_id, best_feat, best_gain, best_split, best_nan_left):
         """Write info about new nodes
@@ -121,9 +189,12 @@ class Tree:
         Returns:
 
         """
-        for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves']:
+        for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
+                     'test_format', 'test_format_offsets', 'feature_importance_gain', 'feature_importance_split']:
             arr = getattr(self, attr)
-            setattr(self, attr, cp.asarray(arr))
+            
+            if type(arr) is np.ndarray:
+                setattr(self, attr, cp.asarray(arr))
 
     def to_cpu(self):
         """Move tree data to the CPU memory
@@ -131,13 +202,15 @@ class Tree:
         Returns:
 
         """
-        for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves']:
+        for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
+                     'test_format', 'test_format_offsets', 'feature_importance_gain', 'feature_importance_split']:
             arr = getattr(self, attr)
-            if type(arr) is not np.ndarray:
+            
+            if type(arr) is cp.ndarray:
                 setattr(self, attr, arr.get())
 
-    def predict_node(self, X):
-        """Predict node id from the feature matrix X
+    def _predict_node_deprecated(self, X):
+        """(DEPRECATED) Predict node id from the feature matrix X
 
         Args:
             X: cp.ndarray of features
@@ -145,23 +218,26 @@ class Tree:
         Returns:
 
         """
+        if self.feats is None:
+            raise Exception('To use _deprecated funcs pass debug=True to .reformat') 
+            
         assert type(self.feats) is cp.ndarray, 'Should be moved to GPU first. Call .to_device()'
         nodes = get_tree_node(X, self.feats, self.val_splits, self.split, self.nans)
         return nodes
 
-    def predict_from_nodes(self, nodes):
-        """Predict outputs from the nodes indices
+    def _predict_from_nodes_deprecated(self, nodes):
+        """(DEPRECATED) Predict outputs from the nodes indices
 
         Args:
             nodes: cp.ndarray of predicted nodes
 
         Returns:
             cp.ndarray of nodes
-        """
+        """ 
         return apply_values(nodes, self.group_index, self.values)
 
-    def predict_leaf_from_nodes(self, nodes):
-        """Predict leaf indices from the nodes indices
+    def _predict_leaf_from_nodes_deprecated(self, nodes):
+        """Predict leaf indices from the nodes indices (Use predict_leaf() method if you need to predict leaves)
 
         Args:
             nodes: cp.ndarray of predicted nodes
@@ -171,8 +247,8 @@ class Tree:
         """
         return apply_values(nodes, cp.arange(self.ngroups, dtype=cp.uint64), self.leaves)
 
-    def predict(self, X):
-        """Predict from the feature matrix X
+    def _predict_deprecated(self, X):
+        """(DEPRECATED) Predict from the feature matrix X
 
         Args:
             X: cp.ndarray of features
@@ -180,18 +256,177 @@ class Tree:
         Returns:
             cp.ndarray of predictions
         """
-        return self.predict_from_nodes(self.predict_leaf_from_nodes(self.predict_node(X)))
+        return self._predict_from_nodes_deprecated(self._predict_leaf_from_nodes_deprecated(self._predict_node_deprecated(X)))
 
-    def predict_leaf(self, X):
-        """Predict leaf indices from the feature matrix X
+    def _predict_leaf_deprecated(self, X):
+        """(DEPRECATED) Predict leaf indices from the feature matrix X
 
         Args:
             X: cp.ndarray of features
 
         Returns:
             cp.ndarray of leaves
+        """ 
+        return self._predict_leaf_from_nodes_deprecated(self._predict_node_deprecated(X))
+
+    def predict_leaf(self, X, pred_leaves=None):
+        """Predict leaf indexes from the feature matrix X
+
+        Args:
+            X: cp.ndarray, array of features
+            pred_leaves: cp.ndarray, buffer for predictions
+
+        Returns:
+            pred_leaves: leaf predictions
+
         """
-        return self.predict_leaf_from_nodes(self.predict_node(X))
+        # check if buffer is None and X on GPU
+        assert type(X) is cp.ndarray, "X must be type of cp.ndarray (located on gpu)"
+        
+        dt = str(X.dtype)
+        
+        assert dt in tree_prediction_leaves_typed_kernels, \
+            f"X array must be of type: {list(tree_prediction_leaves_typed_kernels.keys())}"
+        
+        if pred_leaves is None:
+            pred_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
+
+        # CUDA parameters initialization
+        threads = 128  # threads in one CUDA block
+        sz = X.shape[0] * self.ngroups
+        blocks = sz // threads
+        if sz % threads != 0:
+            blocks += 1
+        
+        tree_prediction_leaves_typed_kernels[dt]((blocks,), (threads,), ((X,
+                                                                          self.test_format,
+                                                                          self.test_format_offsets,
+                                                                          X.shape[1],
+                                                                          X.shape[0],
+                                                                          self.ngroups,
+                                                                          pred_leaves.shape[1],
+                                                                          pred_leaves)))
+        return pred_leaves
+
+    def predict(self, X, pred=None, pred_leaves=None):
+        """Predict from the feature matrix X
+
+        Args:
+            X: cp.ndarray, array of features
+            pred: cp.ndarray, buffer for predictions on GPU, if None - created automatically
+            pred_leaves: cp.ndarray, buffer for internal leaf predictions on GPU, if None - created automatically
+
+        Returns:
+            pred: cp.ndarray, prediction array
+
+        """
+        # check if buffers are None
+        if pred is None:
+            pred = cp.zeros((X.shape[0], self.nout), dtype=cp.float32)
+        if pred_leaves is None:
+            pred_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
+
+        # first step - leaves predictions, actually prediction of indexes in values
+        self.predict_leaf(X, pred_leaves)
+
+        # CUDA parameters initialization
+        threads = 128  # threads in one CUDA block
+        sz = X.shape[0] * self.nout
+        blocks = sz // threads
+        if sz % threads != 0:
+            blocks += 1
+
+        # second step, prediction of actual values
+        tree_prediction_values_kernel((blocks,), (threads,), ((pred_leaves,
+                                                               self.group_index,
+                                                               self.values,
+                                                               self.nout,
+                                                               X.shape[0],
+                                                               pred_leaves.shape[1],
+                                                               pred)))
+        return pred
+
+    def reformat(self, nfeats, debug):
+        """Creates new internal format of the tree for faster inference
+        
+        Args:
+            nfeats: int, number of features in X (train set)
+            debug: bool, if in debug mode
+
+        Returns:
+
+        """
+        n_gr = self.ngroups
+
+        # memory allocation for new tree array
+        gr_subtree_offsets = np.zeros(n_gr, dtype=np.int32)
+        check_empty = []
+        total_size = 0
+        for i in range(n_gr):
+            curr_size = int((self.feats[i] >= 0).sum())
+            # add special case handling - single leaf, no splits
+            check_empty.append(curr_size == 0)
+            curr_size = max(1, curr_size)
+            total_size += curr_size
+            
+            if i < n_gr - 1:
+                gr_subtree_offsets[i + 1] = total_size
+        nf = np.zeros(total_size * 4, dtype=np.float32)
+
+        # reformatting the tree
+        for i in range(n_gr):
+            # handle special case - single leaf, no splits - make a pseudo split node
+            if check_empty[i]:
+                nf[4 * gr_subtree_offsets[i]] = 1.
+                nf[4 * gr_subtree_offsets[i] + 1] = 0.
+                nf[4 * gr_subtree_offsets[i] + 2] = -1.
+                nf[4 * gr_subtree_offsets[i] + 3] = -1.
+                
+                continue
+            
+            q = [(0, 0)]
+            
+            while len(q) != 0:  # BFS in tree
+                n_old, n_new = q[0]
+                if not self.nans[i][n_old]:
+                    nf[4 * (gr_subtree_offsets[i] + n_new)] = float(self.feats[i][n_old] + 1)
+                else:
+                    nf[4 * (gr_subtree_offsets[i] + n_new)] = float(-(self.feats[i][n_old] + 1))
+                nf[4 * (gr_subtree_offsets[i] + n_new) + 1] = float(self.val_splits[i][n_old])
+                ln = self.split[i][n_old][0]
+                rn = self.split[i][n_old][1]
+
+                if self.feats[i][ln] < 0:
+                    nf[4 * (gr_subtree_offsets[i] + n_new) + 2] = float(-(self.leaves[ln][i] + 1))
+                else:
+                    new_node_number = q[-1][1] + 1
+                    nf[4 * (gr_subtree_offsets[i] + n_new) + 2] = float(new_node_number)
+                    q.append((ln, new_node_number))
+
+                if self.feats[i][rn] < 0:
+                    nf[4 * (gr_subtree_offsets[i] + n_new) + 3] = float(-(self.leaves[rn][i] + 1))
+                else:
+                    new_node_number = q[-1][1] + 1
+                    nf[4 * (gr_subtree_offsets[i] + n_new) + 3] = float(new_node_number)
+                    q.append((rn, new_node_number))
+                q.pop(0)
+
+        self.test_format = nf
+        self.test_format_offsets = gr_subtree_offsets
+
+        # feature_ importance with gain
+        self.feature_importance_gain = np.zeros(nfeats, dtype=np.float32)
+        sl = self.feats >= 0
+        np.add.at(self.feature_importance_gain, self.feats[sl], self.gains[sl])
+
+        # feature_ importance with split
+        self.feature_importance_split = np.zeros(nfeats, dtype=np.float32)
+        sl = self.feats >= 0
+        np.add.at(self.feature_importance_split, self.feats[sl], 1)
+
+        if not debug:
+            for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'leaves']:
+                setattr(self, attr, None)
 
 
 class DepthwiseTreeBuilder:
@@ -226,7 +461,6 @@ class DepthwiseTreeBuilder:
             'max_depth': 6,
             'min_data_in_leaf': 10,
             'min_gain_to_split': 0
-
         }, **tree_params}
 
         self.colsampler = colsampler
@@ -242,7 +476,8 @@ class DepthwiseTreeBuilder:
             X: cp.ndarray, quantized feature matrix
             grad: cp.ndarray, gradient matrix
             hess: cp.ndarray, hessian matrix
-            sample_weight: cp.ndarray or None, sample weights
+            sample_weight: cp.ndarray or None, sample's weights
+            grad_fn: gradient fn
             *val_arrays: list of cp.ndarray, list of quantized features for validation sets
 
         Returns:
@@ -285,8 +520,7 @@ class DepthwiseTreeBuilder:
             if G.shape[1] == 1:
                 H = hess if hess.shape[1] == 1 else hess[:, grp_indexer]
             # else we can decide: should we use hess for tree structure search or
-            # assume hess eq. sample weight for all outputs
-            # and then we can use proxy for tree structure search
+            # assume hess eq. sample weight for all outputs, and then we can use proxy for tree structure search
             else:
                 if self.use_hess:
                     H = hess[:, grp_indexer]

@@ -195,7 +195,7 @@ class EvalHistory(Callback):
 
             build_info['iter_score'] = val_metric
 
-        if (((num_iter) % self.verbose) == 0) or (num_iter == (self.ntrees - 1)):
+        if ((num_iter % self.verbose) == 0) or (num_iter == (self.ntrees - 1)):
             logger.info(msg)
 
     @staticmethod

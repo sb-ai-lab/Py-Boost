@@ -1,18 +1,16 @@
 import os
 
 import joblib
-import tqdm
+from tqdm import tqdm
 import treelite
 import treelite_runtime as tl_run
 
 
-def create_node(tree, node_id):
-    """Create a node of treelite tree
-
+def _create_node_deprecated(tree, node_id):
+    """(DEPRECATED) Create a node of treelite tree
     Args:
         tree: Py-Boost Tree, tree to parse
         node_id: int, node index
-
     Returns:
         dict, args of treelite.ModelBuilder.Tree .set_numerical_test_node or .set_leaf_node
     """
@@ -35,7 +33,80 @@ def create_node(tree, node_id):
     return {'value': tree.values[tree.leaves[node_id][0]]}, None, None
 
 
+def create_node(tree, node_id, id_gen):
+    """Create a node of treelite tree
+
+    Args:
+        tree: Py-Boost Tree, tree to parse
+        node_id: int, node index in original format tree
+        id_gen: generator, new id generator
+
+    Returns:
+        dict, args of treelite.ModelBuilder.Tree .set_numerical_test_node
+    """
+
+    assert node_id >= 0
+
+    feature_id = int(tree.test_format[node_id * 4])
+    nan_left = feature_id < 0
+    feature_id = abs(feature_id) - 1
+
+    left = int(tree.test_format[node_id * 4 + 2])
+    right = int(tree.test_format[node_id * 4 + 3])
+    new_id_left = next(id_gen)
+    new_id_right = next(id_gen)
+    node = {
+        'feature_id': feature_id,
+        'opname': '<=',
+        'threshold': tree.test_format[node_id * 4 + 1],
+        'default_left': nan_left,
+        'left_child_key': new_id_left,
+        'right_child_key': new_id_right,
+    }
+
+    return node, (left, new_id_left), (right, new_id_right)
+
+
 def parse_pb_tree(tree):
+    """Parse s single Py-Boost Tree to treelite.ModelBuilder.Tree format
+
+    Args:
+        tree: Py-Boost tree
+
+    Returns:
+        treelite.ModelBuilder.Tree
+    """
+    assert tree.ngroups == 1, 'Models with more than 1 group are not currently supported'
+
+    def id_generator():
+        id_num = 1
+        while True:
+            yield id_num
+            id_num += 1
+    id_gen = id_generator()
+
+    tl_tree = treelite.ModelBuilder.Tree()
+    curr_nodes = [(0, 0)]  # (old_id, new_id)
+
+    while len(curr_nodes) > 0:
+        old_id, new_id = curr_nodes.pop(0)
+        curr_node, left, right = create_node(tree, old_id, id_gen)
+        tl_tree[new_id].set_numerical_test_node(**curr_node)
+
+        if left[0] >= 0:
+            curr_nodes.append(left)
+        else:
+            tl_tree[left[1]].set_leaf_node(tree.values[abs(left[0]) - 1])
+        if right[0] >= 0:
+            curr_nodes.append(right)
+        else:
+            tl_tree[right[1]].set_leaf_node(tree.values[abs(right[0]) - 1])
+
+    tl_tree[0].set_root()
+    return tl_tree
+
+
+def _parse_pb_tree_deprecated(tree):
     """Parse s single Py-Boost Tree to treelite.ModelBuilder.Tree format
 
     Args:
@@ -55,7 +126,7 @@ def parse_pb_tree(tree):
 
         for node_id in curr_nodes:
 
-            curr_node, left, right = create_node(tree, node_id)
+            curr_node, left, right = _create_node_deprecated(tree, node_id)
             # add node
             tl_tree[node_id]
             if left is not None:
@@ -80,7 +151,7 @@ def convert_pb_to_treelite(model):
     Returns:
         treelite.ModelBuilder.Tree
     """
-    nfeats = int(max([tree.feats.max() for tree in model.models]) + 1)
+    nfeats = model.nfeats
     ngroups = model.models[0].values.shape[1]
 
     builder = treelite.ModelBuilder(
@@ -89,12 +160,11 @@ def convert_pb_to_treelite(model):
         pred_transform='identity_multiclass' if ngroups > 1 else 'identity'
     )
 
-    for tree in tqdm.auto.tqdm(model.models):
+    for tree in tqdm(model.models):
         builder.append(parse_pb_tree(tree))
 
     # add bias tree
     bias_tree = treelite.ModelBuilder.Tree()
-    bias_tree[0]
     bias_tree[0].set_numerical_test_node(**{
 
         'feature_id': 0,
@@ -106,7 +176,6 @@ def convert_pb_to_treelite(model):
     })
 
     for i in range(1, 3):
-        bias_tree[i]
         bias_tree[i].set_leaf_node(model.base_score)
 
     bias_tree[0].set_root()
@@ -276,6 +345,7 @@ class TLPredictor:
 
         Args:
             X: np.ndarray
+            nthread: int/None, used for prediction
 
         Returns:
             np.ndarray

@@ -1,6 +1,9 @@
 """Common multiclass metrics"""
 
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 
 from .metrics import Metric, metric_alias
 

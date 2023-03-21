@@ -1,7 +1,11 @@
 """Common losses"""
 
-import cupy as cp
 import numpy as np
+try:
+    import cupy as cp
+    CUDA_FOUND = True
+except Exception:
+    CUDA_FOUND = False
 
 from .metrics import metric_alias, RMSEMetric, RMSLEMetric, BCEMetric
 from .multiclass_metrics import multiclass_metric_alias, CrossEntropyMetric
@@ -150,7 +154,9 @@ class BCELoss(Loss):
         return metric_alias[name]
 
 
-def softmax(x, clip_val=1e-5, xp=cp):
+def softmax(x, clip_val=1e-5):
+    
+    xp = np if type(x) is np.ndarray else cp
     exp_p = xp.exp(x - x.max(axis=1, keepdims=True))
 
     return xp.clip(exp_p / exp_p.sum(axis=1, keepdims=True), clip_val, 1 - clip_val)
@@ -171,7 +177,7 @@ ce_grad_kernel = cp.ElementwiseKernel(
 
     """,
     "ce_grad_kernel"
-)
+) if CUDA_FOUND else None
 
 
 def ce_grad(y_true, y_pred):
@@ -199,8 +205,8 @@ class CrossEntropyLoss(Loss):
         return grad, hess
 
     def postprocess_output(self, y_pred):
-        xp = np if type(y_pred) is np.ndarray else cp
-        return softmax(y_pred, self.clip_value, xp)
+        
+        return softmax(y_pred, self.clip_value)
 
     def preprocess_input(self, y_true):
         return y_true[:, 0].astype(cp.int32)

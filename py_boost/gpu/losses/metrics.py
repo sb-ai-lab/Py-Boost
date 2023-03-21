@@ -1,13 +1,16 @@
 """Common metrics"""
 
-import cupy as cp
+try:
+    import cupy as cp
+except Exception:
+    pass
 
 
 class Metric:
     """Base class to define eval metric function.
     Metric could be defined in 2 ways:
 
-        - redefine .error method. Preffered if possible. Simplified metric definition by calculating error function
+        - redefine .error method. Preferred if possible. Simplified metric definition by calculating error function
             for each point (ex. see RMSEMetric). If metric is defined via .error it also could be used with AdvancedES
 
         - redefine __call__ method. Used for more complex functions, like ROC-AUC. Handling sample_weight
@@ -72,7 +75,7 @@ class Metric:
             arr: list of float, metric values
 
         Returns:
-            int, position of best metric value
+            int, position of the best metric value
         """
         best = arr[0]
         best_n = 0

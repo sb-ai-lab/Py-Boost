@@ -1,8 +1,9 @@
 """Defines sketching strategies to simplify multioutput scoring function calculation"""
 
-import cupy as cp
-
-from copy import deepcopy
+try:
+    import cupy as cp
+except Exception:
+    pass
 
 try:
     from cuml import TruncatedSVD
