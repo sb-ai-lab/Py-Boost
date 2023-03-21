@@ -7,7 +7,8 @@ except Exception:
 import numpy as np
 
 from .utils import apply_values, depthwise_grow_tree, get_tree_node, set_leaf_values, calc_node_values
-from .utils import tree_prediction_leaves_typed_kernels, tree_prediction_values_kernel
+from .utils import tree_prediction_leaves_typed_kernels, tree_prediction_leaves_typed_kernels_f
+from .utils import tree_prediction_values_kernel
 
 
 class Tree:
@@ -192,7 +193,7 @@ class Tree:
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
                      'test_format', 'test_format_offsets', 'feature_importance_gain', 'feature_importance_split']:
             arr = getattr(self, attr)
-            
+
             if type(arr) is np.ndarray:
                 setattr(self, attr, cp.asarray(arr))
 
@@ -205,7 +206,7 @@ class Tree:
         for attr in ['gains', 'feats', 'bin_splits', 'nans', 'split', 'val_splits', 'values', 'group_index', 'leaves',
                      'test_format', 'test_format_offsets', 'feature_importance_gain', 'feature_importance_split']:
             arr = getattr(self, attr)
-            
+
             if type(arr) is cp.ndarray:
                 setattr(self, attr, arr.get())
 
@@ -219,8 +220,8 @@ class Tree:
 
         """
         if self.feats is None:
-            raise Exception('To use _deprecated funcs pass debug=True to .reformat') 
-            
+            raise Exception('To use _deprecated funcs pass debug=True to .reformat')
+
         assert type(self.feats) is cp.ndarray, 'Should be moved to GPU first. Call .to_device()'
         nodes = get_tree_node(X, self.feats, self.val_splits, self.split, self.nans)
         return nodes
@@ -233,7 +234,7 @@ class Tree:
 
         Returns:
             cp.ndarray of nodes
-        """ 
+        """
         return apply_values(nodes, self.group_index, self.values)
 
     def _predict_leaf_from_nodes_deprecated(self, nodes):
@@ -256,7 +257,8 @@ class Tree:
         Returns:
             cp.ndarray of predictions
         """
-        return self._predict_from_nodes_deprecated(self._predict_leaf_from_nodes_deprecated(self._predict_node_deprecated(X)))
+        return self._predict_from_nodes_deprecated(
+            self._predict_leaf_from_nodes_deprecated(self._predict_node_deprecated(X)))
 
     def _predict_leaf_deprecated(self, X):
         """(DEPRECATED) Predict leaf indices from the feature matrix X
@@ -266,7 +268,7 @@ class Tree:
 
         Returns:
             cp.ndarray of leaves
-        """ 
+        """
         return self._predict_leaf_from_nodes_deprecated(self._predict_node_deprecated(X))
 
     def predict_leaf(self, X, pred_leaves=None):
@@ -282,12 +284,12 @@ class Tree:
         """
         # check if buffer is None and X on GPU
         assert type(X) is cp.ndarray, "X must be type of cp.ndarray (located on gpu)"
-        
+
         dt = str(X.dtype)
-        
+
         assert dt in tree_prediction_leaves_typed_kernels, \
             f"X array must be of type: {list(tree_prediction_leaves_typed_kernels.keys())}"
-        
+
         if pred_leaves is None:
             pred_leaves = cp.empty((X.shape[0], self.ngroups), dtype=cp.int32)
 
@@ -297,15 +299,27 @@ class Tree:
         blocks = sz // threads
         if sz % threads != 0:
             blocks += 1
-        
-        tree_prediction_leaves_typed_kernels[dt]((blocks,), (threads,), ((X,
-                                                                          self.test_format,
-                                                                          self.test_format_offsets,
-                                                                          X.shape[1],
-                                                                          X.shape[0],
-                                                                          self.ngroups,
-                                                                          pred_leaves.shape[1],
-                                                                          pred_leaves)))
+
+        if X.flags["C_CONTIGUOUS"]:
+            tree_prediction_leaves_typed_kernels[dt]((blocks,), (threads,), ((X,
+                                                                              self.test_format,
+                                                                              self.test_format_offsets,
+                                                                              X.shape[1],
+                                                                              X.shape[0],
+                                                                              self.ngroups,
+                                                                              pred_leaves.shape[1],
+                                                                              pred_leaves)))
+        elif X.flags["F_CONTIGUOUS"]:
+            tree_prediction_leaves_typed_kernels_f[dt]((blocks,), (threads,), ((X,
+                                                                                self.test_format,
+                                                                                self.test_format_offsets,
+                                                                                X.shape[1],
+                                                                                X.shape[0],
+                                                                                self.ngroups,
+                                                                                pred_leaves.shape[1],
+                                                                                pred_leaves)))
+        else:
+            raise Exception("X must be 'C_CONTIGUOUS' or 'F_CONTIGUOUS'")
         return pred_leaves
 
     def predict(self, X, pred=None, pred_leaves=None):
@@ -368,7 +382,7 @@ class Tree:
             check_empty.append(curr_size == 0)
             curr_size = max(1, curr_size)
             total_size += curr_size
-            
+
             if i < n_gr - 1:
                 gr_subtree_offsets[i + 1] = total_size
         nf = np.zeros(total_size * 4, dtype=np.float32)
@@ -381,11 +395,11 @@ class Tree:
                 nf[4 * gr_subtree_offsets[i] + 1] = 0.
                 nf[4 * gr_subtree_offsets[i] + 2] = -1.
                 nf[4 * gr_subtree_offsets[i] + 3] = -1.
-                
+
                 continue
-            
+
             q = [(0, 0)]
-            
+
             while len(q) != 0:  # BFS in tree
                 n_old, n_new = q[0]
                 if not self.nans[i][n_old]:

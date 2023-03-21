@@ -1,4 +1,5 @@
 """Abstracts for the tree ensembles"""
+import warnings
 
 try:
     import cupy as cp
@@ -327,7 +328,11 @@ class Ensemble:
             is_on_gpu = True
             if type(X) is not cp.ndarray:
                 is_on_gpu = False
-                X = cp.array(X, dtype=cp.float32)
+                X = cp.array(X, order='C', dtype=cp.float32)
+            if not (X.flags['C_CONTIGUOUS'] or X.flags['F_CONTIGUOUS']):
+                warnings.warn("X is not 'C_CONTIGUOUS' or 'F_CONTIGUOUS', contiguous copy of array will be created."
+                              "To reduce inference time, make sure X is contiguous beforehand")
+                X = cp.ascontiguousarray(X)
             gpu_pred = cp.empty((len(iterations), X.shape[0], ngroups), dtype=np.int32)
 
             for j, n in enumerate(iterations):
@@ -423,8 +428,12 @@ class Ensemble:
             is_on_gpu = True
             if type(X) is not cp.ndarray:
                 is_on_gpu = False
-                X = cp.array(X, dtype=cp.float32)
-            # TODO: what if float64 on device or even int
+                X = cp.array(X, order='C', dtype=cp.float32)
+            if not(X.flags['C_CONTIGUOUS'] or X.flags['F_CONTIGUOUS']):
+                warnings.warn("X is not 'C_CONTIGUOUS' or 'F_CONTIGUOUS', contiguous copy of array will be created."
+                              "To reduce inference time, make sure X is contiguous beforehand")
+                X = cp.ascontiguousarray(X)
+
             gpu_pred = cp.empty((X.shape[0], n_out), dtype=cp.float32)
             gpu_pred_leaves = cp.empty((X.shape[0], ngroups), dtype=cp.int32)
 
@@ -539,11 +548,15 @@ class Ensemble:
             is_on_gpu = True
             if type(X) is not cp.ndarray:
                 is_on_gpu = False
-                X = cp.array(X, dtype=cp.float32)
+                X = cp.array(X, order='C', dtype=cp.float32)
                 pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=cp.float32)
             else:
                 pred_full = cp.empty((len(iterations), X.shape[0], n_out), dtype=cp.float32)
-                
+            if not (X.flags['C_CONTIGUOUS'] or X.flags['F_CONTIGUOUS']):
+                warnings.warn("X is not 'C_CONTIGUOUS' or 'F_CONTIGUOUS', contiguous copy of array will be created."
+                              "To reduce inference time, make sure X is contiguous beforehand")
+                X = cp.ascontiguousarray(X)
+
             gpu_pred = cp.empty((X.shape[0], n_out), dtype=cp.float32)
             gpu_pred_leaves = cp.empty((X.shape[0], ngroups), dtype=cp.int32)
 
