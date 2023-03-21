@@ -587,6 +587,47 @@ node_index_kernel = cp.ElementwiseKernel(
 
     'node_index_kernel') if CUDA_FOUND else None
 
+# if F-contiguous array on GPU
+generic_tree_prediction_leaves_kernel_f = r'''
+    extern "C" __global__
+    void tree_prediction_leaves_kernel_f_{TT}(
+        const {T}* X,
+        const float4* tree,
+        const int* gr_subtree_offsets,
+        const int n_features,
+        const int x_size,
+        const int n_gr,
+        const int n_buffer,
+        int* res)
+    {{
+        long long th = blockIdx.x * blockDim.x + threadIdx.x;
+        long long i_ = th / n_gr;
+        if (i_ >= x_size) {{
+            return;
+        }}
+        int j_ = (int)(th % n_gr);
+
+        int tree_offset = gr_subtree_offsets[j_];
+        int n_node = 0;
+        float4 nd;
+        {T} x;
+        int n_feat_raw;
+
+        // going through the tree
+        while (n_node >= 0) {{
+            nd = tree[tree_offset + n_node];
+
+            n_feat_raw = (int)nd.x;
+            x = X[x_size * (abs(n_feat_raw) - 1) + i_];
+
+            {comp}
+        }}
+
+        // writing result
+        res[i_ * n_buffer + j_] = (-n_node - 1);
+    }}
+    '''
+
 generic_tree_prediction_leaves_kernel = r'''
     extern "C" __global__
     void tree_prediction_leaves_kernel_{TT}(
@@ -643,6 +684,16 @@ tree_prediction_leaves_typed_kernels = {
     'int32': cp.RawKernel(generic_tree_prediction_leaves_kernel.format(T='int', TT='int', comp=comp_int),
                           'tree_prediction_leaves_kernel_int') if CUDA_FOUND else None,
     'int64': cp.RawKernel(generic_tree_prediction_leaves_kernel.format(T='long long', TT='longlong', comp=comp_int),
+                          'tree_prediction_leaves_kernel_longlong') if CUDA_FOUND else None
+}
+tree_prediction_leaves_typed_kernels_f = {
+    'float32': cp.RawKernel(generic_tree_prediction_leaves_kernel_f.format(T='float', TT='float', comp=comp_float),
+                            'tree_prediction_leaves_kernel_float') if CUDA_FOUND else None,
+    'float64': cp.RawKernel(generic_tree_prediction_leaves_kernel_f.format(T='double', TT='double', comp=comp_float),
+                            'tree_prediction_leaves_kernel_double') if CUDA_FOUND else None,
+    'int32': cp.RawKernel(generic_tree_prediction_leaves_kernel_f.format(T='int', TT='int', comp=comp_int),
+                          'tree_prediction_leaves_kernel_int') if CUDA_FOUND else None,
+    'int64': cp.RawKernel(generic_tree_prediction_leaves_kernel_f.format(T='long long', TT='longlong', comp=comp_int),
                           'tree_prediction_leaves_kernel_longlong') if CUDA_FOUND else None
 }
 

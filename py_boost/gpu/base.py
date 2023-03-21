@@ -424,7 +424,6 @@ class Ensemble:
             if type(X) is not cp.ndarray:
                 is_on_gpu = False
                 X = cp.array(X, dtype=cp.float32)
-            # TODO: what if float64 on device or even int
             gpu_pred = cp.empty((X.shape[0], n_out), dtype=cp.float32)
             gpu_pred_leaves = cp.empty((X.shape[0], ngroups), dtype=cp.int32)
 
