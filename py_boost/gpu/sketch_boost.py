@@ -34,7 +34,7 @@ class SketchBoost(GradientBoosting):
 
                  sketch_outputs=1,
                  sketch_method='proj',
-                 use_hess=True,
+                 use_hess=False,
 
                  callbacks=None,
                  sketch_params=None

@@ -83,7 +83,7 @@ class SVDSketch(GradSketch):
 
         if hess.shape[1] > 1:
             hess = self.svd.transform(hess)
-            hess = cp.clip(hess, 0.01)
+            hess = cp.clip(hess, 0.01, None)
 
         return grad, hess
 
@@ -158,7 +158,7 @@ class RandomProjectionSketch(GradSketch):
 
         if hess.shape[1] > 1:
             hess = cp.dot(hess, P)
-            hess = cp.clip(hess, 0.01)
+            hess = cp.clip(hess, 0.01, None)
 
         return grad, hess
 
