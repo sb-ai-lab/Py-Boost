@@ -7,6 +7,7 @@ except Exception:
     pass
 import numpy as np
 
+from .serialization import dump, load
 from .utils import pinned_array
 from ..quantization.base import QuantileQuantizer, UniformQuantizer, UniquantQuantizer
 
@@ -179,7 +180,8 @@ class Ensemble:
                 gpu_batch.set(x_batch, stream=st)
 
                 for j, n in enumerate(iterations):
-                    self.models[n]._predict_leaf_deprecated(gpu_batch).get(stream=st, out=leaves[j, i: i + x_batch.shape[0]])
+                    self.models[n]._predict_leaf_deprecated(gpu_batch).get(stream=st,
+                                                                           out=leaves[j, i: i + x_batch.shape[0]])
 
                 stop_event = st.record()
                 stop_events.append(stop_event)
@@ -206,7 +208,7 @@ class Ensemble:
         # Iteration list validation
         if iterations is None:
             iterations = list(range(len(self.models)))
-            
+
         self.to_device()
         prediction = pinned_array(np.empty((len(iterations), X.shape[0], self.base_score.shape[0]), dtype=np.float32))
 
@@ -276,7 +278,7 @@ class Ensemble:
             importance: np.ndarray 1d of float32, shape (n_features)
         """
         assert imp_type in ['gain', 'split'], "Importance type should be 'gain' or 'split'"
-            
+
         importance = np.zeros(self.nfeats, dtype=np.float32)
 
         for tree in self.models:
@@ -307,19 +309,19 @@ class Ensemble:
             For n_groups explanation check Tree class
         """
         assert batch_size > 0, 'Batch size must be a positive integer'
-        
+
         if iterations is None:
             iterations = np.arange(len(self.models))
         else:
             iterations = np.array(iterations, dtype=np.int64)
-            
+
         assert len(iterations) > 0, 'Iterations are empty sequence'
         assert (max(iterations) < len(self.models)) and (min(iterations) >= 0), 'Invalid stage numbers'
         assert len(np.unique(iterations)) == len(iterations), 'Duplicate values in stages are not allowed'
 
         check_grp = np.unique([x.ngroups for x in self.models])
         assert len(check_grp) == 1, 'Different number of groups in trees'
-        
+
         ngroups = check_grp[0]
 
         self.to_device()
@@ -348,7 +350,8 @@ class Ensemble:
 
         # result allocation
         cpu_leaves_full = np.empty((len(iterations), X.shape[0], ngroups), dtype=np.int32)
-        cpu_leaves = [pinned_array(np.empty((len(iterations), batch_size, ngroups), dtype=np.int32)) for _ in range(n_streams)]
+        cpu_leaves = [pinned_array(np.empty((len(iterations), batch_size, ngroups), dtype=np.int32)) for _ in
+                      range(n_streams)]
         gpu_leaves = [cp.empty((len(iterations), batch_size, ngroups), dtype=cp.int32) for _ in range(n_streams)]
 
         # batch allocation
@@ -418,7 +421,7 @@ class Ensemble:
             prediction: np.ndarray 2d of float32, shape (n_data, n_outputs)
         """
         assert batch_size > 0, 'Batch size must be a positive integer'
-        
+
         ngroups = max((x.ngroups for x in self.models))
         n_out = self.base_score.shape[0]
 
@@ -429,7 +432,7 @@ class Ensemble:
             if type(X) is not cp.ndarray:
                 is_on_gpu = False
                 X = cp.array(X, order='C', dtype=cp.float32)
-            if not(X.flags['C_CONTIGUOUS'] or X.flags['F_CONTIGUOUS']):
+            if not (X.flags['C_CONTIGUOUS'] or X.flags['F_CONTIGUOUS']):
                 warnings.warn("X is not 'C_CONTIGUOUS' or 'F_CONTIGUOUS', contiguous copy of array will be created."
                               "To reduce inference time, make sure X is contiguous beforehand")
                 X = cp.ascontiguousarray(X)
@@ -529,16 +532,16 @@ class Ensemble:
             prediction, np.ndarray 2d of float32, shape (n_iterations, n_data, n_out)
         """
         assert batch_size > 0, 'Batch size must be a positive integer'
-        
+
         if iterations is None:
             iterations = np.arange(len(self.models))
         else:
             iterations = np.array(iterations, dtype=np.int64)
-            
+
         assert len(iterations) > 0, 'Iterations are empty sequence'
         assert (max(iterations) < len(self.models)) and (min(iterations) >= 0), 'Invalid stage numbers'
         assert len(np.unique(iterations)) == len(iterations), 'Duplicate values in stages are not allowed'
-        
+
         ngroups = max((x.ngroups for x in self.models))
         n_out = self.base_score.shape[0]
 
@@ -579,7 +582,8 @@ class Ensemble:
 
         # result allocation
         cpu_pred_full = np.empty((len(iterations), X.shape[0], n_out), dtype=np.float32)
-        cpu_pred = [pinned_array(np.empty((len(iterations), batch_size, n_out), dtype=np.float32)) for _ in range(n_streams)]
+        cpu_pred = [pinned_array(np.empty((len(iterations), batch_size, n_out), dtype=np.float32)) for _ in
+                    range(n_streams)]
         gpu_pred = [cp.empty((batch_size, n_out), dtype=cp.float32) for _ in range(n_streams)]
 
         # temp buffer for leaves
@@ -619,7 +623,8 @@ class Ensemble:
                     tree.predict(gpu_batch[nst][:real_batch_len], gpu_pred[nst][:real_batch_len],
                                  gpu_pred_leaves[nst][:real_batch_len])
                     if iterations[i_next] == i_tree:
-                        self.postprocess_fn(gpu_pred[nst][:real_batch_len]).get(out=cpu_pred[nst][i_next][:real_batch_len])
+                        self.postprocess_fn(gpu_pred[nst][:real_batch_len]).get(
+                            out=cpu_pred[nst][i_next][:real_batch_len])
                         i_next += 1
                         if i_next >= len(iterations):
                             break
@@ -631,10 +636,34 @@ class Ensemble:
         # waiting for sync of last two batches
         with map_streams[1 - last_n_stream]:
             cpu_out_ready_event[1 - last_n_stream].synchronize()
-            cpu_pred_full[:, X.shape[0] - (batch_size + last_batch_size): X.shape[0] - last_batch_size] =\
+            cpu_pred_full[:, X.shape[0] - (batch_size + last_batch_size): X.shape[0] - last_batch_size] = \
                 cpu_pred[1 - last_n_stream][:, :batch_size]
         with map_streams[last_n_stream]:
             cpu_out_ready_event[last_n_stream].synchronize()
             cpu_pred_full[:, X.shape[0] - last_batch_size:] = cpu_pred[last_n_stream][:, :last_batch_size]
 
         return cpu_pred_full
+
+    def dump(self, file):
+        """Dump model data to json
+
+        Args:
+            file: str, file path
+
+        Returns:
+
+        """
+        dump(self, file)
+        return
+
+    def load(self, file):
+        """Load model data from json
+
+        Args:
+            file: str, file path
+
+        Returns:
+            Py-Boost Ensemble
+        """
+        load(self, file)
+        return self

@@ -6,7 +6,9 @@ data/
 catboost_info/
 py_boost_venv
 publish_package.sh
+reinstall.sh
 poetry.lock
+.idea
 *.py[cod]
 *$py.class
 

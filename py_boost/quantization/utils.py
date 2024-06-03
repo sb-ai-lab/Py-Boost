@@ -9,7 +9,7 @@ numba.config.THREADING_LAYER = 'threadsafe'
 
 def _apply_borders_1d(x_raw, x_enc, borders):
     # encode raw values
-    sl = ~np.isnan(x_raw)
+    sl = np.nonzero(~np.isnan(x_raw))[0]
     x_enc[sl] = np.searchsorted(borders, x_raw[sl])
 
     return
@@ -24,6 +24,7 @@ numba_apply_borders_1d = njit(sign, parallel=False)(_apply_borders_1d)
 
 def _apply_borders(X, X_enc, borders):
     for i in prange(X.shape[1]):
+        i = int64(i)  # to prevent unsafe cast numba warning
         numba_apply_borders_1d(X[:, i], X_enc[:, i], borders[i])
 
     return
@@ -100,6 +101,7 @@ def quantize_features(fn, X, max_bins=255, min_data_in_bin=3):
     Returns:
     """
     assert 0 < max_bins <= 255, 'Max bins should be between 0 and 255'
+    assert min_data_in_bin > 0, 'Min data in bin should be > 0'
 
     borders_ = np.empty((X.shape[1], max_bins + 1), dtype=X.dtype)
     borders_[:] = np.nan

@@ -1,35 +1,68 @@
 """Utilities used for trees building and inference"""
 
 import math
+
 import numba
 import numpy as np
+
 try:
     import cupy as cp
+
     CUDA_FOUND = True
 except Exception:
     CUDA_FOUND = False
 
 
-def validate_input(X, y, sample_weight=None, eval_sets=None):
-    if eval_sets is None:
-        eval_sets = []
+def validate_input_single(X, y, sample_weight):
+    """Format single dataset to fit py_boost
 
+    Args:
+        X: np.ndarray, features
+        y: np.ndarray, targets
+        sample_weight: np.ndarray or None, sample weights
+
+    Returns:
+        tuple
+    """
+    y = np.asarray(y)
     if len(y.shape) == 1:
         y = y[:, np.newaxis]
+
+    X = np.asarray(X)
+    if np.issubdtype(X.dtype, np.integer):
+        X = X.astype(np.float32)
 
     if (sample_weight is not None) and (len(sample_weight.shape) == 1):
         sample_weight = sample_weight[:, np.newaxis]
 
-    eval_sets = list(eval_sets)
-    for val_arr in eval_sets:
-        if len(val_arr['y'].shape) == 1:
-            val_arr['y'] = val_arr['y'][:, np.newaxis]
+    return X, y, sample_weight
 
+
+def validate_input(X, y, sample_weight=None, eval_sets=None):
+    """Format train and valid datasets to fit py_boost
+
+    Args:
+        X: np.ndarray, features
+        y: np.ndarray, targets
+        sample_weight: np.ndarray or None, sample weights
+        eval_sets: list of dicts, valid datasets
+
+    Returns:
+        tuple
+    """
+    X, y, sample_weight = validate_input_single(X, y, sample_weight)
+
+    if eval_sets is None:
+        eval_sets = []
+    else:
+        eval_sets = list(eval_sets)
+
+    for val_arr in eval_sets:
         if 'sample_weight' not in val_arr:
             val_arr['sample_weight'] = None
 
-        if (val_arr['sample_weight'] is not None) and (len(val_arr['sample_weight'].shape) == 1):
-            val_arr['sample_weight'] = val_arr['sample_weight'][:, np.newaxis]
+        val_arr['X'], val_arr['y'], val_arr['sample_weight'] = validate_input_single(
+            val_arr['X'], val_arr['y'], val_arr['sample_weight'])
 
     return X, y, sample_weight, eval_sets
 
@@ -305,6 +338,7 @@ def histogram(arr, gh, nodes, col_indexer, row_indexer, out_indexer, nnodes, max
 
 
 loss_kernel = cp.ElementwiseKernel(
+    # inputs
     """
     float32 grad, float32 hess, 
     float32 total_grad, float32 total_hess, 
@@ -312,34 +346,33 @@ loss_kernel = cp.ElementwiseKernel(
 
     uint64 nodes_count, 
     float32 lambda_l2, float32 min_data_in_left
-
-
     """,
+    # output
     'raw float32 res',
 
+    # kernel
     """
-
     float rG;
     float G = grad;
     float H = hess;
     float C = hess / total_hess * nodes_count;
+    float prev = total_grad * total_grad / (total_hess + lambda_l2);
 
 
     if (fmin(nodes_count - C, C) > min_data_in_left) {
         rG = total_grad - G;
-        res[2 * i] = G * G / (H + lambda_l2) + rG * rG / (total_hess - H + lambda_l2);
+        res[2 * i] = G * G / (H + lambda_l2) + rG * rG / (total_hess - H + lambda_l2) - prev;
     }
 
     if ((nan_hess > 0) and (hess < total_hess)) {
 
         C -= nan_hess / total_hess * nodes_count;
-
         if (fmin(nodes_count - C, C) > min_data_in_left) {
 
             G -= nan_grad;
             H -= nan_hess;
             rG = total_grad - G;
-            res[2 * i + 1] = G * G / (H + lambda_l2) + rG * rG / (total_hess - H + lambda_l2);
+            res[2 * i + 1] = G * G / (H + lambda_l2) + rG * rG / (total_hess - H + lambda_l2) - prev;
 
         }
     }
@@ -431,8 +464,6 @@ def get_best_split(loss, col_indexer):
         select_total(
             best_feat_, best_gain, best_split, best_nan_left, col_indexer, nfeats
         )
-
-    best_gain -= loss[:, 0, -1, 0]
 
     return best_feat, best_gain, best_split, best_nan_left
 
@@ -954,21 +985,21 @@ def set_leaf_values(feats, split):
     for i in range(feats.shape[0]):
 
         acc = 0
-        
+
         nodes = [np.int32(0), ]
-        
+
         while len(nodes) > 0:
             new_nodes = []
-            
+
             for n in nodes:
                 if feats[i, n] == -1:
                     leaves[n, i] = acc
                     acc += 1
                 else:
                     new_nodes.extend(split[i, n])
-                    
+
             nodes = new_nodes
-        
+
         max_leaves = max(max_leaves, acc)
 
     return leaves, max_leaves
