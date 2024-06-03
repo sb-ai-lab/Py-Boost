@@ -24,6 +24,9 @@ Moreover, ones your model is trained on GPU, it could be converted to perform th
 converting to the [treelite](https://treelite.readthedocs.io/) format with build-in wrapper (limitation - model should
 be trained with `target_splitter='Single'`, which is the default).
 
+**ONNX compatible** Since v0.5 Py-Boost is compatible with ONNX format that allows more options the CPU inference and
+model deployment.
+
 **Easy to customize**. Py-boost can be easily customized even if one is not familiar with GPU programming (just replace
 np with cp). What can be customized? Almost everything via custom callbacks. Examples: Row/Col sampling strategy,
 Training control, Losses/metrics, Multioutput handling strategy, Anything via custom callbacks
