@@ -1,6 +1,6 @@
 import logging
-import sys
 import subprocess
+import sys
 import warnings
 
 _root_logger = logging.getLogger()
@@ -14,11 +14,20 @@ if not _root_logger.hasHandlers():
 
 try:
     subprocess.check_output('nvidia-smi')
+    CUDA_FOUND = True
+except Exception:
+    CUDA_FOUND = False
+
+from .utils.tl_wrapper import TLPredictor, TLCompiledPredictor
+from .utils.onnx_wrapper import pb_to_onnx, ONNXPredictor
+
+if CUDA_FOUND:
     from .gpu.boosting import GradientBoosting
     from .gpu.sketch_boost import SketchBoost
     from .gpu.losses.losses import Loss
     from .gpu.losses.metrics import Metric
     from .callbacks.callback import Callback
+
     __all__ = [
 
         'GradientBoosting',
@@ -30,20 +39,20 @@ try:
         'gpu',
         'multioutput',
         'sampling',
-        'utils'
+        'utils',
+        'pb_to_onnx',
 
     ]
-    
-except Exception:
+
+else:
     warnings.warn('No Nvidia GPU detected! Only treelite inference on CPU is available')
     __all__ = []
-
-from .utils.tl_wrapper import TLPredictor, TLCompiledPredictor
 
 __all__.extend([
 
     'TLPredictor',
     'TLCompiledPredictor',
+    'ONNXPredictor'
 
 ])
 

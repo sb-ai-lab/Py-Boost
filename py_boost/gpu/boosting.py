@@ -10,8 +10,8 @@ from .tree import DepthwiseTreeBuilder
 from .utils import pad_and_move, validate_input
 from ..callbacks.callback import EarlyStopping, EvalHistory, CallbackPipeline
 from ..multioutput.sketching import GradSketch
-from ..sampling.bagging import BaseSampler
 from ..multioutput.target_splitter import SingleSplitter, OneVsAllSplitter
+from ..sampling.bagging import BaseSampler
 
 
 class GradientBoosting(Ensemble):
@@ -121,6 +121,9 @@ class GradientBoosting(Ensemble):
 
         self.ntrees = self.params['ntrees']
         self.lr = self.params['lr']
+
+        assert self.params['min_gain_to_split'] >= 0, 'Param min_gain_to_split should be >= 0'
+
         self.min_gain_to_split = self.params['min_gain_to_split']
         self.lambda_l2 = self.params['lambda_l2']
         self.gd_steps = self.params['gd_steps']
@@ -161,6 +164,8 @@ class GradientBoosting(Ensemble):
         self.loss = self.params['loss']
         if type(self.params['loss']) is str:
             self.loss = loss_alias[self.params['loss']]
+
+        self.postprocess_fn = self.loss.postprocess_output
 
         self.metric = self.params['metric']
         if self.params['metric'] is None or type(self.params['metric']) is str:
@@ -293,7 +298,6 @@ class GradientBoosting(Ensemble):
 
         # save nfeatures for the feature importances
         self.nfeats = X.shape[1]
-        self.postprocess_fn = self.loss.postprocess_output
 
         builder = DepthwiseTreeBuilder(borders,
                                        use_hess=self.use_hess,
@@ -351,3 +355,16 @@ class GradientBoosting(Ensemble):
         }
 
         return builder, build_info
+
+    def load(self, file):
+        """Load weights fromm file
+
+        Args:
+            file: str, file path
+
+        Returns:
+            Py-Boost GradientBoosting
+        """
+        self._infer_params()
+
+        return super().load(file)

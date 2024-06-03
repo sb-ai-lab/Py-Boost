@@ -1,27 +1,26 @@
 [tool.poetry]
 name = "Py-Boost"
-version = "0.4.3"
+version = "0.5.0"
 description = "Python based GBDT"
 
 authors = ["Vakhrushev Anton <btbpanda@gmail.com>",
-           "Iosipoi Leonid",
-           "Sergey Kupriyanov"]
-           
+    "Iosipoi Leonid",
+    "Sergey Kupriyanov"]
+
 readme = "README.md"
 
-repository = "https://github.com/AILab-MLTools/Py-Boost"
+repository = "https://github.com/sb-ai-lab/Py-Boost"
 classifiers = [
     "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Operating System :: OS Independent",
-    "Intended Audience :: Science/Research",
+    "Intended Audience :: Science/Research/Data Science",
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
-    "Natural Language :: Russian",
+    "Natural Language :: English",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
-
 ]
 
 [tool.poetry.dependencies]
@@ -32,19 +31,22 @@ scikit-learn = ">=1"
 numpy = "*"
 joblib = "*"
 numba = "*"
+ujson = '*'
 
 pandas = ">=1"
+onnx = ">=1.16, <2"
+onnxruntime = ">=1.16, <2"
 treelite = [
-    {version = "<3.2,>=3", python = "<3.8"},
-    {version = "^3", python = ">=3.8"}
+    { version = "<3.2,>=3", python = "<3.8" },
+    { version = "^3", python = ">=3.8" }
 ]
 treelite_runtime = [
-    {version = "<3.2,>=3", python = "<3.8"},
-    {version = "^3", python = ">=3.8"}
+    { version = "<3.2,>=3", python = "<3.8" },
+    { version = "^3", python = ">=3.8" }
 ]
 tqdm = ">=4.64.1"
 
-importlib-metadata = {version = "^1.0", python = "<3.8"}
+importlib-metadata = { version = "^1.0", python = "<3.8" }
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
