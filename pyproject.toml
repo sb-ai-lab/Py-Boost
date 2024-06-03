@@ -16,7 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Operating System :: OS Independent",
-    "Intended Audience :: Science/Research/Data Science",
+    "Intended Audience :: Science/Research",
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Natural Language :: English",
