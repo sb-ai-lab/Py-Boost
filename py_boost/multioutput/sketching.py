@@ -118,7 +118,7 @@ class RandomSamplingSketch(GradSketch):
         self.replace = replace
 
     def __call__(self, grad, hess):
-        best_idx = (grad ** 2).mean(axis=0)
+        best_idx = (grad ** 2).mean(axis=0) + 1e-3
         pi = best_idx / best_idx.sum()
         pi = self.smooth * cp.ones_like(pi) / grad.shape[1] + (1 - self.smooth) * pi
 
