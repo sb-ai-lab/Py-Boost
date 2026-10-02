@@ -195,6 +195,7 @@ class DepthwiseTreeBuilder:
     """This class builds decision tree with given parameters"""
 
     def __init__(self, borders,
+                 use_hess=True,
                  colsampler=None,
                  subsampler=None,
                  target_splitter=None,
@@ -212,6 +213,7 @@ class DepthwiseTreeBuilder:
             **tree_params: other tree building parameters
         """
         self.borders = borders
+        self.use_hess = use_hess
         self.params = {**{
 
             'lr': 1.,
@@ -277,19 +279,21 @@ class DepthwiseTreeBuilder:
             # if output group len eq. 1, we have single output tree, use hess for structure search
             if G.shape[1] == 1:
                 H = hess if hess.shape[1] == 1 else hess[:, grp_indexer]
-            # else we assume hess eq. sample weight for all outputs and we can use proxy for tree structure search
+            # else we can decide: should we use hess for tree structure search or
+            # assume hess eq. sample weight for all outputs
+            # and then we can use proxy for tree structure search
             else:
-                H = sample_weight if sample_weight is not None else cp.ones((G.shape[0], 1), dtype=cp.float32)
+                if self.use_hess:
+                    H = hess[:, grp_indexer]
+                else:
+                    H = sample_weight if sample_weight is not None else cp.ones((G.shape[0], 1), dtype=cp.float32)
                 if self.multioutput_sketch is not None:
                     G, H = self.multioutput_sketch(G, H)
 
-            gh = cp.concatenate((G, H), axis=1)
-
-            out_indexer = cp.arange(gh.shape[1], dtype=cp.uint64)
             group_index[grp_indexer] = n_grp
             # grow single group of the tree and get nodes index
-            train_nodes, valid_nodes = depthwise_grow_tree(tree, n_grp, X, gh,
-                                                           row_indexer, col_indexer, out_indexer, self.params,
+            train_nodes, valid_nodes = depthwise_grow_tree(tree, n_grp, X, G, H,
+                                                           row_indexer, col_indexer, self.params,
                                                            valid_arrs=val_arrays)
             # update nodes group
             nodes_group[:, n_grp] = train_nodes

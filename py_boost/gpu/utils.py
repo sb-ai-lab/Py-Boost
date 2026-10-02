@@ -612,9 +612,14 @@ def get_gpu_splitters(unique_nodes, new_nodes_id, best_feat, best_split, best_na
     return out, new_unique_nodes
 
 
-def depthwise_grow_tree(tree, group, arr, gh, row_indexer, col_indexer, out_indexer, params, valid_arrs=None):
+def depthwise_grow_tree(tree, group, arr, grad, hess, row_indexer, col_indexer, params, valid_arrs=None):
     if valid_arrs is None:
         valid_arrs = []
+
+    # create gh
+    n_out = grad.shape[1]
+    gh = cp.concatenate((grad, hess), axis=1)
+    out_indexer = cp.arange(gh.shape[1], dtype=cp.uint64)
 
     # init nodes with single zero node
     unique_nodes = np.zeros(1, dtype=np.int32)
@@ -642,7 +647,7 @@ def depthwise_grow_tree(tree, group, arr, gh, row_indexer, col_indexer, out_inde
                             big_index=big_index)
 
         # assume hess is the last output
-        loss = calc_loss(gh_hist[:-1], gh_hist[-1:], nodes_count, lambda_l2=params['lambda_l2'],
+        loss = calc_loss(gh_hist[:n_out], gh_hist[n_out:], nodes_count, lambda_l2=params['lambda_l2'],
                          min_data_in_leaf=params['min_data_in_leaf'])
 
         if loss.shape[0] > 1:

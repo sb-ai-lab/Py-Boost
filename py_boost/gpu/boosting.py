@@ -31,6 +31,7 @@ class GradientBoosting(Ensemble):
                  quant_sample=100000,
                  target_splitter='Single',
                  multioutput_sketch=None,
+                 use_hess=True,
                  es=100,
                  seed=42,
                  verbose=10,
@@ -70,6 +71,7 @@ class GradientBoosting(Ensemble):
         self.max_bin = max_bin
         self.max_depth = max_depth
         self.min_data_in_leaf = min_data_in_leaf
+        self.use_hess = use_hess
 
         self.colsample = colsample
         if type(colsample) in [float, int]:
@@ -250,6 +252,7 @@ class GradientBoosting(Ensemble):
                  for x in eval_sets]
 
         builder = DepthwiseTreeBuilder(borders,
+                                       use_hess=self.use_hess,
                                        colsampler=self.colsample,
                                        subsampler=self.subsample,
                                        target_splitter=self.target_splitter,

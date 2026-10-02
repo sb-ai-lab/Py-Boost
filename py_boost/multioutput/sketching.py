@@ -44,6 +44,9 @@ class TopOutputsSketch(GradSketch):
         best_idx = (grad ** 2).mean(axis=0).argsort()[-self.topk:]
         grad = grad[:, best_idx]
 
+        if hess.shape[1] > 1:
+            hess = hess[:, best_idx]
+
         return grad, hess
 
 
@@ -71,9 +74,12 @@ class SVDSketch(GradSketch):
             sub_grad = grad[idx[:self.sample]]
 
         svd.fit(sub_grad)
-        proxy_grad = svd.transform(grad)
+        grad = svd.transform(grad)
 
-        return proxy_grad, hess
+        if hess.shape[1] > 1:
+            hess = svd.transform(hess)
+
+        return grad, hess
 
     def after_iteration(self, build_info):
         """Free memory to avoid OOM.
@@ -109,5 +115,8 @@ class RandomSamplingSketch(GradSketch):
         gg = grad / cp.sqrt(self.n * pi)
         rand_idx = cp.random.choice(cp.arange(grad.shape[1]), size=self.n, replace=True, p=pi)
         grad = gg[:, rand_idx]
+
+        if hess.shape[1] > 1:
+            hess = hess[:, rand_idx]
 
         return grad, hess
