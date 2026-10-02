@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: py-boost
-Version: 0.1.0
+Version: 0.1.1
 Summary: Python based GBDT
 Home-page: https://github.com/sberbank-ai-lab/Py-Boost
 Author: Vakhrushev Anton
@@ -17,7 +17,6 @@ Classifier: Programming Language :: Python :: 3.7
 Classifier: Programming Language :: Python :: 3.8
 Classifier: Programming Language :: Python :: 3.9
 Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
-Requires-Dist: cupy (>=9.0.0)
 Requires-Dist: importlib-metadata (>=1.0,<2.0); python_version < "3.8"
 Requires-Dist: joblib
 Requires-Dist: numba
@@ -51,15 +50,19 @@ Py-boost is a Python-based gradient boosting library which aims at overcoming th
 
 ## Installation
 
-pip install -U py_boost
+Before installing py-boost via pip you should have cupy installed. You can use:
+
+`pip install -U cupy-cuda110 py-boost`
+
+**Note**: replace with your cuda version! For the details see [this guide](https://docs.cupy.dev/en/stable/install.html)
 
 
 ## Quick tour
 
 Py-boost is easy to use since it has similar to scikit-learn interface. For usage example please see:
 
-* ***Tutorial_1_Basics.ipynb*** for simple usage examples
-* ***Tutorial_2_Advanced_multioutput.ipynb*** for advanced multioutput features
+* [Tutorial_1_Basics.ipynb](https://github.com/sberbank-ai-lab/Py-Boost/blob/master/Tutorial_1_Basics.ipynb) for simple usage examples
+* [Tutorial_2_Advanced_multioutput.ipynb](https://github.com/sberbank-ai-lab/Py-Boost/blob/master/Tutorial_2_Advanced_multioutput.ipynb) for advanced multioutput features
 
 
 

@@ -22,15 +22,19 @@ Py-boost is a Python-based gradient boosting library which aims at overcoming th
 
 ## Installation
 
-pip install -U py_boost
+Before installing py-boost via pip you should have cupy installed. You can use:
+
+`pip install -U cupy-cuda110 py-boost`
+
+**Note**: replace with your cuda version! For the details see [this guide](https://docs.cupy.dev/en/stable/install.html)
 
 
 ## Quick tour
 
 Py-boost is easy to use since it has similar to scikit-learn interface. For usage example please see:
 
-* ***Tutorial_1_Basics.ipynb*** for simple usage examples
-* ***Tutorial_2_Advanced_multioutput.ipynb*** for advanced multioutput features
+* [Tutorial_1_Basics.ipynb](https://github.com/sberbank-ai-lab/Py-Boost/blob/master/Tutorial_1_Basics.ipynb) for simple usage examples
+* [Tutorial_2_Advanced_multioutput.ipynb](https://github.com/sberbank-ai-lab/Py-Boost/blob/master/Tutorial_2_Advanced_multioutput.ipynb) for advanced multioutput features
 
 
 
