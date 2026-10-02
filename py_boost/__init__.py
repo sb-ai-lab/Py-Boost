@@ -11,10 +11,12 @@ if not _root_logger.hasHandlers():
     _logger.propagate = False
 
 from .gpu.boosting import GradientBoosting
+from .gpu.sketch_boost import SketchBoost
 
 __all__ = [
 
     'GradientBoosting',
+    'SketchBoost',
     'callbacks',
     'gpu',
     'multioutput',
