@@ -1,0 +1,72 @@
+Metadata-Version: 2.1
+Name: py-boost
+Version: 0.1.0
+Summary: Python based GBDT
+Home-page: https://github.com/sberbank-ai-lab/Py-Boost
+Author: Vakhrushev Anton
+Author-email: AGVakhrushev@sberbank.ru
+Requires-Python: >=3.6.1,<3.10
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Science/Research
+Classifier: Natural Language :: Russian
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Dist: cupy (>=9.0.0)
+Requires-Dist: importlib-metadata (>=1.0,<2.0); python_version < "3.8"
+Requires-Dist: joblib
+Requires-Dist: numba
+Requires-Dist: numpy
+Requires-Dist: pandas (>=1)
+Requires-Dist: scikit-learn (>=0.22)
+Project-URL: Repository, https://github.com/sberbank-ai-lab/Py-Boost
+Description-Content-Type: text/markdown
+
+# Py-boost: a research tool for exploring GBDTs
+
+Modern gradient boosting toolkits are very complex and are written in low-level programming languages. As a result,
+
+* It is hard to customize them to suit one’s needs 
+* New ideas and methods are not easy to implement
+* It is difficult to understand how they work
+
+Py-boost is a Python-based gradient boosting library which aims at overcoming the aforementioned problems. 
+
+**Authors**: [Anton Vakhrushev](https://kaggle.com/btbpanda), [Leonid Iosipoi](http://iosipoi.com/).
+
+
+## Py-boost Key Features
+
+**Simple**. Py-boost is a simplified gradient boosting library but it supports all main features and hyperparameters available in other implementations.
+
+**Fast with GPU**. Despite the fact that Py-boost is written in Python, it works only on GPU and uses Python GPU libraries such as CuPy and Numba.
+
+**Easy to customize**. Py-boost can be easily customized even if one is not familiar with GPU programming (just replace np with cp).  What can be customized? Almost everuthing via custom callbacks. Examples: Row/Col sampling strategy, Training control, Losses/metrics, Multioutput handling strategy, Anything via custom callbacks
+
+
+## Installation
+
+pip install -U py_boost
+
+
+## Quick tour
+
+Py-boost is easy to use since it has similar to scikit-learn interface. For usage example please see:
+
+* ***Tutorial_1_Basics.ipynb*** for simple usage examples
+* ***Tutorial_2_Advanced_multioutput.ipynb*** for advanced multioutput features
+
+
+
+## Other Sber AI Lab Projects
+LightAutoML: https://github.com/sberbank-ai-lab/LightAutoML  
+AutoWoE: https://github.com/sberbank-ai-lab/AutoMLWhitebox  
+RePlay: https://github.com/sberbank-ai-lab/RePlay  
+
+
+
