@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: py-boost
-Version: 0.1.3
+Version: 0.1.4
 Summary: Python based GBDT
 Home-page: https://github.com/sberbank-ai-lab/Py-Boost
 Author: Vakhrushev Anton

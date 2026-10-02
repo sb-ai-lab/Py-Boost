@@ -96,7 +96,7 @@ class SVDSketch(GradSketch):
 class RandomSamplingSketch(GradSketch):
     """RandomSampling Sketching. Gradient columns are randomly sampled with probabilities."""
 
-    def __init__(self, n=10, smooth=0.1):
+    def __init__(self, n=10, smooth=0.1, replace=True):
         """
 
         Args:
@@ -106,17 +106,42 @@ class RandomSamplingSketch(GradSketch):
         """
         self.n = n
         self.smooth = smooth
+        self.replace = replace
 
     def __call__(self, grad, hess):
-        best_idx = (grad ** 2).mean(axis=0)
+        best_idx = (grad ** 2).mean(axis=0) 
         pi = best_idx / best_idx.sum()
         pi = self.smooth * cp.ones_like(pi) / grad.shape[1] + (1 - self.smooth) * pi
 
         gg = grad / cp.sqrt(self.n * pi)
-        rand_idx = cp.random.choice(cp.arange(grad.shape[1]), size=self.n, replace=True, p=pi)
+        rand_idx = cp.random.choice(cp.arange(grad.shape[1]), size=self.n, replace=self.replace, p=pi)
         grad = gg[:, rand_idx]
 
         if hess.shape[1] > 1:
             hess = hess[:, rand_idx]
+
+        return grad, hess
+
+
+class RandomProjectionSketch(GradSketch):
+
+    def __init__(self, n, norm=True):
+
+        self.k = n
+        self.norm = norm
+
+    def __call__(self, grad, hess):
+
+        if self.norm:
+            P = cp.random.randn(grad.shape[1], self.k, dtype=cp.float32)
+        else:
+            P = (cp.random.rand(grad.shape[1], self.k, dtype=cp.float32) > .5).astype(cp.float32) * 2 - 1
+
+        P /= cp.sqrt(1 / self.k)
+
+        grad = cp.dot(grad, P)
+
+        if hess.shape[1] > 1:
+            hess = cp.dot(hess, P)
 
         return grad, hess
