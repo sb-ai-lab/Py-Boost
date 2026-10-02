@@ -118,7 +118,7 @@ class R2Score(RMSEMetric):
         return v0 > v1
 
 
-class RMSLEMetric(Metric):
+class RMSLEMetric(RMSEMetric):
     """RMSLE Metric for the regression/multiregression classification task"""
     alias = 'rmsle'
 

@@ -93,15 +93,25 @@ class MSELoss(Loss):
         return metric_alias[name]
 
 
-class MSLELoss(MSELoss):
+class MSLELoss(Loss):
     """MSLE Loss function for regression/multiregression"""
 
     def preprocess_input(self, y_true):
-        assert (y_true >= 0), 'Inputs for msle should be non negative'
-        return cp.log1p(y_true)
+        assert (y_true >= 0).all(), 'Inputs for msle should be non negative'
+
+        return y_true
+
+    def get_grad_hess(self, y_true, y_pred):
+        y_true = cp.log1p(y_true)
+
+        return (y_pred - y_true), cp.ones((y_true.shape[0], 1), dtype=cp.float32)
 
     def postprocess_output(self, y_pred):
         return cp.expm1(y_pred)
+
+    def base_score(self, y_true):
+        y_true = cp.log1p(y_true)
+        return y_true.mean(axis=0)
 
     def get_metric_from_string(self, name=None):
         if name is None:
