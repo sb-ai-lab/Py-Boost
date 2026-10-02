@@ -3,7 +3,7 @@
 import cupy as cp
 
 try:
-    from cuml import TruncatedSVD, Handle
+    from cuml import TruncatedSVD
 except ImportError:
     pass
 
@@ -62,22 +62,25 @@ class SVDSketch(GradSketch):
         """
         self.svd_params = {**{'algorithm': 'jacobi', 'n_components': 5, 'n_iter': 5}, **svd_params}
         self.sample = sample
+        self.svd = None
+
+    def before_train(self, build_info):
+        self.svd = TruncatedSVD(output_type='cupy', **self.svd_params)
 
     def __call__(self, grad, hess):
-        handle = Handle()
 
-        svd = TruncatedSVD(handle=handle, output_type='cupy', **self.svd_params)
         sub_grad = grad
         if (self.sample is not None) and (grad.shape[0] > self.sample):
             idx = cp.arange(grad.shape[0], dtype=cp.int32)
             cp.random.shuffle(idx)
             sub_grad = grad[idx[:self.sample]]
 
-        svd.fit(sub_grad)
-        grad = svd.transform(grad)
+        self.svd.fit(sub_grad)
+        grad = self.svd.transform(grad)
 
         if hess.shape[1] > 1:
-            hess = svd.transform(hess)
+            hess = self.svd.transform(hess)
+            hess = cp.clip(hess, 0.01)
 
         return grad, hess
 
@@ -91,6 +94,9 @@ class SVDSketch(GradSketch):
 
         """
         build_info['mempool'].free_all_blocks()
+
+    def after_train(self, build_info):
+        self.svd = None
 
 
 class RandomSamplingSketch(GradSketch):
@@ -109,7 +115,7 @@ class RandomSamplingSketch(GradSketch):
         self.replace = replace
 
     def __call__(self, grad, hess):
-        best_idx = (grad ** 2).mean(axis=0) 
+        best_idx = (grad ** 2).mean(axis=0)
         pi = best_idx / best_idx.sum()
         pi = self.smooth * cp.ones_like(pi) / grad.shape[1] + (1 - self.smooth) * pi
 
@@ -124,9 +130,15 @@ class RandomSamplingSketch(GradSketch):
 
 
 class RandomProjectionSketch(GradSketch):
+    """Random projection sketch"""
 
     def __init__(self, n, norm=True):
+        """
 
+        Args:
+            n: int, number of output dimensions
+            norm: if True use normal distribution, otherwise +1/-1
+        """
         self.k = n
         self.norm = norm
 
@@ -143,5 +155,6 @@ class RandomProjectionSketch(GradSketch):
 
         if hess.shape[1] > 1:
             hess = cp.dot(hess, P)
+            hess = cp.clip(hess, 0.01)
 
         return grad, hess
