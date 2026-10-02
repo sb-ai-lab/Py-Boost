@@ -57,6 +57,7 @@ class GradientBoosting(Ensemble):
                 'Single', 'OneVsAll' or custom
             multioutput_sketch: None or Callable. Defines the sketching strategy to simplify scoring function
                 in multioutput case. If None full scoring function is used
+            use_hess: If True hessians will be used in tree structure search
             es: int, early stopping rounds. If 0, no early stopping
             seed: int, random state
             verbose: int, verbosity freq

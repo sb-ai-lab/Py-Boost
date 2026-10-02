@@ -143,7 +143,7 @@ histogram_kernel_idx = cp.ElementwiseKernel(
             val = (feat_4t >> (8 * pos)) % 256;
             j = jj[j_ * 4 + pos];
             x_ptr = &hist[0] +  kk * hlen + nodes[i_] * flen + j * length + val;
-            atomicAdd_block(x_ptr, y); 
+            atomicAdd(x_ptr, y); 
         }
     }
 
@@ -717,8 +717,8 @@ accumulate_gh_kernel = cp.ElementwiseKernel(
 
     int y_ptr =  node * nout + out;
 
-    atomicAdd_block(&grad_sum[y_ptr], grad[row_indexer * nout + out]); 
-    atomicAdd_block(&hess_sum[y_ptr], hess[row_indexer * hxst + out * hyst]); 
+    atomicAdd(&grad_sum[y_ptr], grad[row_indexer * nout + out]); 
+    atomicAdd(&hess_sum[y_ptr], hess[row_indexer * hxst + out * hyst]); 
 
     """,
 
