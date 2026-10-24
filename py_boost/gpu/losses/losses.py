@@ -7,7 +7,7 @@ try:
 except Exception:
     CUDA_FOUND = False
 
-from .metrics import metric_alias, RMSEMetric, RMSLEMetric, BCEMetric
+from .metrics import metric_alias, RMSEMetric, RMSLEMetric, BCEMetric, NaNBCEMetric, NaNAucMetric
 from .multiclass_metrics import multiclass_metric_alias, CrossEntropyMetric
 
 
@@ -154,6 +154,36 @@ class BCELoss(Loss):
         return metric_alias[name]
 
 
+class BCEWithNaNLoss(BCELoss):
+    """Binary/multilabel log loss with missing (NaN) targets.
+
+    Missing labels contribute zero gradient and Hessian. Initial log odds
+    use only observed labels; an entirely missing output starts at zero
+    (probability 0.5). Use positive lambda_l2 for leaves with no observed
+    labels. The default evaluation metric also ignores missing labels.
+    """
+
+    def base_score(self, y_true):
+        observed = ~cp.isnan(y_true)
+        counts = observed.sum(axis=0)
+        means = cp.where(observed, y_true, 0).sum(axis=0) / cp.maximum(counts, 1).astype(y_true.dtype)
+        means = cp.where(counts > 0, means, 0.5)
+        means = cp.clip(means, self.clip_value, 1 - self.clip_value)
+        return cp.log(means / (1 - means))
+
+    def get_grad_hess(self, y_true, y_pred):
+        missing = cp.isnan(y_true)
+        grad, hess = super().get_grad_hess(cp.where(missing, 0, y_true), y_pred)
+        return cp.where(missing, 0, grad), cp.where(missing, 0, hess)
+
+    def get_metric_from_string(self, name=None):
+        if name is None or name in ('bce', 'logloss'):
+            return NaNBCEMetric()
+        if name in ('auc', 'roc'):
+            return NaNAucMetric()
+        return metric_alias[name]
+
+
 def softmax(x, clip_val=1e-5):
     
     xp = np if type(x) is np.ndarray else cp
@@ -224,6 +254,9 @@ loss_alias = {
     'bce': BCELoss(),
     'multilabel': BCELoss(),
     'logloss': BCELoss(),
+
+    'bce_nan': BCEWithNaNLoss(),
+    'multilabel_nan': BCEWithNaNLoss(),
 
     # for multiclass
     'multiclass': CrossEntropyLoss(),

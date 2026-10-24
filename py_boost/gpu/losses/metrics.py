@@ -1,5 +1,7 @@
 """Common metrics"""
 
+import numpy as np
+
 try:
     import cupy as cp
 except Exception:
@@ -201,6 +203,167 @@ class RocAucMetric(Metric):
         return v0 > v1
 
 
+def _nan_metric_inputs(y_true, y_pred, sample_weight):
+    """Validate shapes and prepare row weights for metrics with missing labels."""
+    y_true, y_pred = cp.asarray(y_true), cp.asarray(y_pred)
+    if y_true.ndim == 1:
+        y_true = y_true[:, None]
+    if y_pred.ndim == 1:
+        y_pred = y_pred[:, None]
+    if y_true.ndim != 2 or y_true.shape != y_pred.shape or y_true.shape[1] == 0:
+        raise ValueError('Targets and predictions must have the same nonempty output dimension')
+
+    if sample_weight is None:
+        weights = cp.ones((y_true.shape[0], 1), dtype=cp.float64)
+    else:
+        weights = cp.asarray(sample_weight, dtype=cp.float64)
+        if weights.ndim == 1:
+            weights = weights[:, None]
+        if weights.shape != (y_true.shape[0], 1):
+            raise ValueError('sample_weight must have shape (n_samples,) or (n_samples, 1)')
+        if not bool(cp.isfinite(weights).all()) or bool((weights < 0).any()):
+            raise ValueError('sample_weight must be finite and nonnegative')
+    observed = ~cp.isnan(y_true) & (weights > 0)
+    if bool((observed & (y_true != 0) & (y_true != 1)).any()):
+        raise ValueError('Observed binary targets must be 0 or 1')
+    if bool((observed & ~cp.isfinite(y_pred)).any()):
+        raise ValueError('Predictions must be finite at observed, positive-weight labels')
+    return y_true, y_pred, weights
+
+
+def _output_weights(weights):
+    weights = np.array(weights, dtype=np.float64, copy=True)
+    if (weights.ndim != 1 or not np.isfinite(weights).all()
+            or (weights < 0).any() or not (weights > 0).any()):
+        raise ValueError('Output weights must be a finite, nonnegative vector with positive total weight')
+    return weights
+
+
+def _nan_weighted_mean(values, weights=None):
+    """Average defined outputs, preserving infinite errors for incorrect predictions."""
+    if weights is None:
+        weights = np.ones(values.shape[0], dtype=np.float64)
+    if weights.shape != values.shape:
+        raise ValueError('There must be one output weight per target column')
+    valid = ~np.isnan(values) & (weights > 0)
+    if not valid.any():
+        return float('nan')
+    # Rescale first to avoid overflow for large finite output weights.
+    weights = weights[valid] / weights[valid].max()
+    return float(np.sum(values[valid] * weights) / weights.sum())
+
+
+class NaNBCEMetric(BCEMetric):
+    """Binary log loss averaged over observed labels, ignoring NaN targets.
+
+    Row weights may have shape (n_samples,) or (n_samples, 1). With
+    return_list=True, return a CuPy vector of per-output losses. An output
+    with no positively weighted labels has NaN loss; the scalar result is
+    NaN only when there are no observed labels with positive weight.
+    """
+    alias = 'BCE_nan'
+
+    def __call__(self, y_true, y_pred, sample_weight=None, return_list=False):
+        y_true, y_pred, weights = _nan_metric_inputs(y_true, y_pred, sample_weight)
+        observed = ~cp.isnan(y_true) & (weights > 0)
+        if bool((observed & ((y_pred < 0) | (y_pred > 1))).any()):
+            raise ValueError('BCE predictions must be probabilities between 0 and 1')
+        # Mask before evaluating the loss: NaN/inf at missing labels must not
+        # contaminate the result, and multiplying an infinite error by zero
+        # would still produce NaN.
+        err = self.error(cp.where(observed, y_true, 0), cp.where(observed, y_pred, 0.5))
+        numerator = (cp.where(observed, err, 0) * weights).sum(axis=0)
+        denominator = (observed * weights).sum(axis=0)
+        if return_list:
+            return numerator / cp.where(denominator > 0, denominator, cp.nan)
+        total = denominator.sum()
+        return float(numerator.sum() / cp.where(total > 0, total, cp.nan))
+
+
+class BCEWithNaNMetricWeighted(NaNBCEMetric):
+    """Weighted mean of per-output NaN-aware binary log losses.
+
+    Output weights are normalized over outputs with observed labels and
+    positive weight. If no such output remains, return NaN.
+    """
+
+    def __init__(self, output_weights):
+        self.output_weights = _output_weights(output_weights)
+
+    def __call__(self, y_true, y_pred, sample_weight=None):
+        errors = super().__call__(y_true, y_pred, sample_weight, return_list=True).get()
+        return _nan_weighted_mean(errors, self.output_weights)
+
+
+# Retain the spelling used by existing custom-metric implementations.
+BCEwithNaNMetricWeighted = BCEWithNaNMetricWeighted
+
+
+class NaNAucMetric(Metric):
+    """Macro ROC AUC over binary outputs with missing targets.
+
+    NaN labels and zero-weight rows are excluded independently per output.
+    Outputs without positive weight in both classes have undefined AUC
+    (NaN) and are excluded from the macro average. Return NaN when every
+    output is undefined. return_list=True returns a NumPy vector, including
+    NaNs for undefined outputs. Sample weights are passed to each ROC AUC.
+    """
+    alias = 'AUC_nan'
+
+    def __call__(self, y_true, y_pred, sample_weight=None, return_list=False):
+        y_true, y_pred, weights = _nan_metric_inputs(y_true, y_pred, sample_weight)
+        scores = np.full(y_true.shape[1], np.nan, dtype=np.float64)
+        for i in range(y_true.shape[1]):
+            observed = ~cp.isnan(y_true[:, i]) & (weights[:, 0] > 0)
+            labels = y_true[observed, i]
+            w = weights[observed, 0]
+            if not bool((labels == 0).any()) or not bool((labels == 1).any()):
+                continue
+            scores[i] = auc(labels, y_pred[observed, i], w)
+        return scores if return_list else _nan_weighted_mean(scores)
+
+    def compare(self, v0, v1):
+        return v0 > v1
+
+
+class NaNAucMetricByClass(NaNAucMetric):
+    """Per-output ROC AUC as a NumPy vector; for reporting, not early stopping."""
+
+    def __call__(self, y_true, y_pred, sample_weight=None):
+        return super().__call__(y_true, y_pred, sample_weight, return_list=True)
+
+
+class NaNGiniMetricByClass(NaNAucMetricByClass):
+    """Per-output Gini (2 * AUC - 1); for reporting, not early stopping."""
+    alias = 'Gini_nan'
+
+    def __call__(self, y_true, y_pred, sample_weight=None):
+        return 2 * super().__call__(y_true, y_pred, sample_weight) - 1
+
+
+class NaNGiniMetricAtN(NaNAucMetric):
+    """Weighted macro Gini over the first n outputs (all outputs by default).
+
+    prod_weights has one finite, nonnegative weight per target column and
+    is normalized over selected outputs with defined AUC and positive
+    weight. Return NaN if none remain. n selects by column order, not score.
+    """
+    alias = 'Gini_nan'
+
+    def __call__(self, y_true, y_pred, sample_weight=None, prod_weights=None, n=None):
+        scores = super().__call__(y_true, y_pred, sample_weight, return_list=True)
+        if n is None:
+            n = len(scores)
+        if isinstance(n, (bool, np.bool_)) or not isinstance(n, (int, np.integer)) or not 1 <= n <= len(scores):
+            raise ValueError('n must be an integer between 1 and the number of outputs')
+        weights = None if prod_weights is None else _output_weights(prod_weights)
+        if weights is not None:
+            if weights.shape != scores.shape:
+                raise ValueError('There must be one output weight per target column')
+            weights = weights[:n]
+        return _nan_weighted_mean(2 * scores[:n] - 1, weights)
+
+
 class ThresholdMetrics(Metric):
     """Basic class to handle metrics, that accept class label prediction as input"""
 
@@ -319,6 +482,10 @@ metric_alias = {
     # for bce
     'bce': BCEMetric(),
     'logloss': BCEMetric(),
+
+    'bce_nan': NaNBCEMetric(),
+    'auc_nan': NaNAucMetric(),
+    'gini_nan': NaNGiniMetricAtN(),
 
     'precision': Precision(),
     'recall': Recall(),

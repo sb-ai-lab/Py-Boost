@@ -9,6 +9,7 @@ __all__ = [
     'MSELoss',
     'MSLELoss',
     'BCELoss',
+    'BCEWithNaNLoss',
     'CrossEntropyLoss',
 
     'Metric',
@@ -16,6 +17,13 @@ __all__ = [
     'RMSLEMetric',
     'R2Score',
     'BCEMetric',
+    'NaNBCEMetric',
+    'BCEWithNaNMetricWeighted',
+    'BCEwithNaNMetricWeighted',
+    'NaNAucMetric',
+    'NaNAucMetricByClass',
+    'NaNGiniMetricByClass',
+    'NaNGiniMetricAtN',
     'AccuracyMetric',
     'RocAucMetric',
 

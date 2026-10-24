@@ -68,3 +68,60 @@ Py-boost is easy to use since it has similar to scikit-learn interface. For usag
   examples of parsing and inference on CPU with ONNX
 
 More examples are coming soon
+
+## Missing binary targets
+
+For binary or multilabel targets, use `NaN` for unknown labels and `0` for
+observed negatives. `BCEWithNaNLoss` excludes missing labels from gradients,
+Hessians and initial class frequencies. An entirely unobserved output starts
+at probability 0.5. Keep `lambda_l2 > 0` so leaves without observed labels
+have finite updates.
+
+```python
+from py_boost import GradientBoosting
+from py_boost.gpu.losses import BCEWithNaNLoss, NaNAucMetric
+
+model = GradientBoosting(BCEWithNaNLoss(), metric=NaNAucMetric(), lambda_l2=1)
+model.fit(X_train, y_train, eval_sets=[{"X": X_valid, "y": y_valid}])
+```
+
+The loss also accepts aliases `bce_nan` and `multilabel_nan`. Its default
+metric is `NaNBCEMetric`; metric names `bce`/`logloss` and `auc`/`roc` select
+the corresponding NaN-aware metrics when used with this loss. Explicit metric
+aliases `bce_nan`, `auc_nan` and `gini_nan` are also available. Existing losses
+and their default metrics are unchanged.
+
+Import these metrics from `py_boost.gpu.losses`:
+
+| Metric | Result |
+| --- | --- |
+| `NaNBCEMetric` | Mean BCE over observed labels; `return_list=True` gives per-output losses as a CuPy array. |
+| `BCEWithNaNMetricWeighted(output_weights)` | Weighted mean of per-output BCE. `BCEwithNaNMetricWeighted` is an alias. |
+| `NaNAucMetric` | Macro ROC AUC; `return_list=True` gives a NumPy array. |
+| `NaNAucMetricByClass` | Per-output ROC AUC as a NumPy array, for reporting. |
+| `NaNGiniMetricByClass` | Per-output Gini (`2 * AUC - 1`) as a NumPy array, for reporting. |
+| `NaNGiniMetricAtN` | Weighted macro Gini; call with `prod_weights=` and `n=` to restrict to the first `n` target columns. |
+
+All metrics support nonnegative row weights of shape `(n_samples,)` or
+`(n_samples, 1)`. NaN labels and zero-weight rows are excluded independently
+for each target. ROC AUC/Gini are undefined for outputs without positive
+weight in both classes; BCE is undefined for outputs without any positively
+weighted labels. Per-output results contain NaN for these outputs, and macro
+metrics exclude them. A scalar metric is NaN if no eligible output remains.
+Validate that your evaluation set has enough observed labels for early stopping;
+the per-class vector metrics are for reporting only.
+
+Observed targets must be binary. Predictions must be finite wherever a label
+has positive row weight; invalid predictions are reported as errors rather
+than treated as missing labels. BCE additionally requires probabilities in
+`[0, 1]`, while ROC AUC/Gini also accept finite decision scores.
+
+Output/product weights must follow target column order and are normalized
+over eligible, positively weighted outputs. `n` selects leading columns,
+not the outputs with the highest scores. Compared with custom implementations
+that return an unnormalized weighted sum, non-unit-sum weights therefore have
+different semantics. Standard `CrossValidation` is supported; `AdaptiveESCV`
+requires an explicit scorer for missing labels.
+
+GPU regression tests can be run with `python -m pytest -q tests/test_nan_losses.py`
+after installing Py-Boost, a compatible CuPy build, and pytest.
