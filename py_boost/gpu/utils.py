@@ -268,7 +268,8 @@ def fill_histogram(res, arr, target, nodes, col_indexer, row_indexer, out_indexe
     feats_batch = math.ceil(pfeats / nsplits)
     # split by features
     if feats_batch == nfeats:
-        out_batch = magic_constant // nfb
+        # A single output can already exceed the histogram size budget.
+        out_batch = max(1, magic_constant // nfb)
     else:
         out_batch = 1
 
