@@ -329,7 +329,8 @@ def histogram(arr, gh, nodes, col_indexer, row_indexer, out_indexer, nnodes, max
         row_indexer = row_indexer[isin(nodes, small_index, row_indexer)]
 
     fill_histogram(res, arr, gh, nodes, col_indexer, row_indexer, out_indexer)
-    res = res.cumsum(axis=-1)
+    # Reuse the buffer instead of allocating a second full histogram.
+    res.cumsum(axis=-1, out=res)
 
     if prev_hist is not None:
         # indices are paired.
@@ -843,6 +844,8 @@ def depthwise_grow_tree(tree, group, arr, grad, hess, row_indexer, col_indexer, 
                             prev_hist=prev_hist,
                             small_index=small_index,
                             big_index=big_index)
+        # The parent histogram is only needed while constructing this level.
+        prev_hist = None
 
         # assume hess is the last output
         loss = calc_loss(gh_hist[:n_out], gh_hist[n_out:], nodes_count, lambda_l2=params['lambda_l2'],
@@ -854,6 +857,7 @@ def depthwise_grow_tree(tree, group, arr, grad, hess, row_indexer, col_indexer, 
             loss = loss[0]
 
         best_feat, best_gain, best_split, best_nan_left = get_best_split(loss, col_indexer)
+        del loss
 
         # move to CPU and apply min_gain_to_split condition
         unique_nodes, new_nodes_id, best_feat, best_gain, best_split, best_nan_left, is_valid_node = \
@@ -888,6 +892,9 @@ def depthwise_grow_tree(tree, group, arr, grad, hess, row_indexer, col_indexer, 
             # save histogram for the subs trick
             prev_hist, small_index, big_index = get_prev_hist(cpu_counts,
                                                               gh_hist, cp.asarray(is_valid_node))
+
+        # Only the selected parent histograms are needed at the next level.
+        del gh_hist
 
     return nodes, valid_nodes
 
