@@ -46,6 +46,36 @@ def test_numpy_sampling_rates_train_like_python(regression_data, name, rate):
     np.testing.assert_allclose(actual, reference.predict(X), rtol=1e-5, atol=1e-6)
 
 
+@pytest.mark.parametrize('name, axis', [('colsample', 1), ('subsample', 0)])
+@pytest.mark.parametrize('length', [65_504, 65_520, 100_000])
+def test_float16_rates_on_large_sampling_axes(name, axis, length):
+    model = GradientBoosting('mse', **{name: np.float16(0.5)})
+    model._infer_params()
+    sampler = getattr(model, name)
+    shape = [1, 1]
+    shape[axis] = length
+    build_info = {'data': {'train': {'features_gpu': cp.empty(shape, dtype=cp.uint8)}}}
+
+    # NumPy 2 can cast the axis length to float16 before multiplication.
+    sampler.before_train(build_info)
+    assert sampler().shape == (length // 2,)
+    sampler.after_train(build_info)
+
+
+def test_float16_subsample_trains_on_large_dataset():
+    X = np.random.default_rng(42).normal(size=(100_000, 2)).astype(np.float32)
+    y = X[:, 0].copy()
+    params = dict(loss='mse', ntrees=2, max_depth=2, es=0, verbose=0)
+    model = GradientBoosting(**params, subsample=np.float16(0.5)).fit(X, y)
+    reference = GradientBoosting(**params, subsample=0.5).fit(X, y)
+
+    assert len(model.models) == 2
+    actual = model.predict(X)
+    assert np.isfinite(actual).all()
+    assert np.std(actual) > 0
+    np.testing.assert_allclose(actual, reference.predict(X), rtol=1e-5, atol=1e-6)
+
+
 @pytest.mark.parametrize('name', ['colsample', 'subsample'])
 @pytest.mark.parametrize('rate', [
     0, -0.1, 1.1, np.nan, np.inf, -np.inf,

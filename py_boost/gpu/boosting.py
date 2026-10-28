@@ -21,7 +21,8 @@ def _get_sampler(value, axis, name):
     if isinstance(value, Real) and not isinstance(value, bool):
         if not 0 < value <= 1:
             raise ValueError(f'{name} must be in (0, 1], got {value!r}')
-        return BaseSampler(value, axis=axis)
+        # Keep axis-length arithmetic out of NumPy's low-precision scalar dtypes.
+        return BaseSampler(float(value), axis=axis)
 
     hooks = ('before_train', 'before_iteration', 'after_iteration', 'after_train')
     if callable(value) and all(callable(getattr(value, hook, None)) for hook in hooks):
