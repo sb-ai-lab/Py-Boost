@@ -226,7 +226,8 @@ class FilterSketch(GradSketch):
         # leaf values
         last_leaves = build_info['data']['train']['last_tree']['leaves']
         self.queue.append(last_leaves)
-        self.max_nodes = max(int(last_leaves.max()), self.max_nodes)
+        # Leaf IDs start at zero, so the largest ID needs its own buffer entry.
+        self.max_nodes = max(int(last_leaves.max()) + 1, self.max_nodes)
         self.max_trees = max(last_leaves.shape[1], self.max_trees)
 
     def after_train(self, build_info):
