@@ -46,11 +46,16 @@ see [Tutorial_2_Advanced_multioutput](https://github.com/AILab-MLTools/Py-Boost/
 
 ## Installation
 
-Before installing py-boost via pip, you should have cupy installed. You can use:
+Py-Boost supports Python 3.8–3.14. Install the CuPy distribution compatible
+with your Python and CUDA versions before installing Py-Boost.
 
-`pip install -U cupy-cuda110 py-boost`
+On Python 3.14, use Numba 0.63 or later and CuPy 14 or later. For example,
+with CUDA 12.x:
 
-**Note**: replace with your cuda version! For details, see [this guide](https://docs.cupy.dev/en/stable/install.html).
+`pip install -U "cupy-cuda12x>=14" py-boost`
+
+For other Python or CUDA versions, choose the appropriate CuPy package from the
+[CuPy installation guide](https://docs.cupy.dev/en/stable/install.html).
 
 ## Quick tour
 

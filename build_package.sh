@@ -6,7 +6,7 @@ source ./py_boost_venv/bin/activate
 
 pip install -U pip
 pip install -U poetry
-pip install -U cupy-cuda110
+pip install -U "${CUPY_PACKAGE:-cupy-cuda12x}"
 
 poetry lock
 poetry install
