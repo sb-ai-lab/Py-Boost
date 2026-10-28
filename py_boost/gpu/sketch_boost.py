@@ -63,7 +63,7 @@ class SketchBoost(GradientBoosting):
 
             es: int, early stopping rounds. If 0, no early stopping
             seed: int, random state
-            verbose: int, verbosity freq
+            verbose: int, logging interval; <=0 disables progress logging
             sketch_outputs: int, number of outputs to keep
             sketch_method: str, name of the sketching strategy
             use_hess: bool, use hessians in multioutput training

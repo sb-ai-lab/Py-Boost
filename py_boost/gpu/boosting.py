@@ -76,7 +76,7 @@ class GradientBoosting(Ensemble):
 
             es: int, early stopping rounds. If 0, no early stopping
             seed: int, random state
-            verbose: int, verbosity freq
+            verbose: int, logging interval; <=0 disables progress logging
             callbacks: list of Callback, callbacks to customize training are passed here
 
             debug: bool, if debug mode is enabled (it removes ability to use deprecated functions,
