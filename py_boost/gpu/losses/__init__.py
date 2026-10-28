@@ -19,7 +19,6 @@ __all__ = [
     'BCEMetric',
     'NaNBCEMetric',
     'BCEWithNaNMetricWeighted',
-    'BCEwithNaNMetricWeighted',
     'NaNAucMetric',
     'NaNAucMetricByClass',
     'NaNGiniMetricByClass',

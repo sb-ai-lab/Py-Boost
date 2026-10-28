@@ -1,5 +1,6 @@
 """Default callbacks"""
 import logging
+import math
 from ..utils.logging import verbosity_to_loglevel, set_stdout_level
 
 logger = logging.getLogger(__name__)
@@ -253,6 +254,13 @@ class EarlyStopping(Callback):
         num_iter = build_info['num_iter']
         # if multiple valid sets passed - use the last one
         score = build_info['iter_score'][-1]
+        if math.isnan(score):
+            raise ValueError(
+                f"Early stopping metric '{self.metric.alias}' is undefined (NaN) on "
+                f"evaluation set {len(build_info['iter_score']) - 1}. Check observed labels "
+                'and positive sample weights, choose another metric or evaluation set, '
+                'or disable early stopping with es=0.'
+            )
 
         if num_iter == 0:
             self.best_score = score

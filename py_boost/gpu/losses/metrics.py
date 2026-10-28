@@ -159,22 +159,27 @@ def auc(y, x, sample_weight=None):
         return 0.5
 
     if sample_weight is None:
-        sample_weight = cp.ones_like(y)
+        sample_weight = cp.ones(y.shape, dtype=cp.float64)
+
+    # AUC is invariant to separate rescaling of the two classes. Normalize
+    # before summation to avoid overflow/underflow, even for imbalanced weights.
+    positive_weight = cp.asarray(sample_weight, dtype=cp.float64) * y
+    negative_weight = cp.asarray(sample_weight, dtype=cp.float64) * (1 - y)
+    positive_scale, negative_scale = positive_weight.max(), negative_weight.max()
+    positive_weight /= cp.where(positive_scale > 0, positive_scale, 1)
+    negative_weight /= cp.where(negative_scale > 0, negative_scale, 1)
 
     rank_x = cp.searchsorted(unique_x, x)
 
     sum_1 = cp.zeros_like(unique_x, dtype=cp.float64)
-    sum_1.scatter_add(rank_x, sample_weight * y)
+    sum_1.scatter_add(rank_x, positive_weight)
 
     sum_0 = cp.zeros_like(unique_x, dtype=cp.float64)
-    sum_0.scatter_add(rank_x, sample_weight * (1 - y))
+    sum_0.scatter_add(rank_x, negative_weight)
 
-    cs_0 = sum_0.cumsum()
-    auc_ = (cs_0 - sum_0 / 2) * sum_1
-
-    tot = cs_0[-1] * sum_1.sum()
-
-    return float(auc_.sum() / tot)
+    sum_0 /= sum_0.sum()
+    sum_1 /= sum_1.sum()
+    return float(((sum_0.cumsum() - sum_0 / 2) * sum_1).sum())
 
 
 class RocAucMetric(Metric):
@@ -272,12 +277,21 @@ class NaNBCEMetric(BCEMetric):
         # contaminate the result, and multiplying an infinite error by zero
         # would still produce NaN.
         err = self.error(cp.where(observed, y_true, 0), cp.where(observed, y_pred, 0.5))
-        numerator = (cp.where(observed, err, 0) * weights).sum(axis=0)
-        denominator = (observed * weights).sum(axis=0)
-        if return_list:
-            return numerator / cp.where(denominator > 0, denominator, cp.nan)
-        total = denominator.sum()
-        return float(numerator.sum() / cp.where(total > 0, total, cp.nan))
+        # Exclude missing rows before selecting the scale. Per-output metrics
+        # need independent scales so large weights in other outputs cannot
+        # underflow all weights in an otherwise well-defined output.
+        weights = cp.where(observed, weights, 0)
+        axis = 0 if return_list else None
+        if weights.shape[0]:
+            scale = weights.max(axis=axis)
+            weights /= cp.where(scale > 0, scale, 1)
+        # An impossible prediction still has infinite loss at any positive
+        # original weight, even if rescaling underflows that weight to zero.
+        weighted_error = cp.where(observed & cp.isinf(err), cp.inf, err * weights)
+        numerator = weighted_error.sum(axis=axis)
+        denominator = weights.sum(axis=axis)
+        result = numerator / cp.where(denominator > 0, denominator, cp.nan)
+        return result if return_list else float(result)
 
 
 class BCEWithNaNMetricWeighted(NaNBCEMetric):
@@ -293,10 +307,6 @@ class BCEWithNaNMetricWeighted(NaNBCEMetric):
     def __call__(self, y_true, y_pred, sample_weight=None):
         errors = super().__call__(y_true, y_pred, sample_weight, return_list=True).get()
         return _nan_weighted_mean(errors, self.output_weights)
-
-
-# Retain the spelling used by existing custom-metric implementations.
-BCEwithNaNMetricWeighted = BCEWithNaNMetricWeighted
 
 
 class NaNAucMetric(Metric):

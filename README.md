@@ -73,9 +73,11 @@ More examples are coming soon.
 
 For binary or multilabel targets, use `NaN` for unknown labels and `0` for
 observed negatives. `BCEWithNaNLoss` excludes missing labels from gradients,
-Hessians and initial class frequencies. An entirely unobserved output starts
-at probability 0.5. Keep `lambda_l2 > 0` so leaves without observed labels
-have finite updates.
+Hessians and initial class frequencies. Every training target column must
+contain at least one observed label. Otherwise, training raises `ValueError`
+listing the zero-based indices of the affected columns; no columns are
+silently removed. Entirely unobserved columns are allowed in evaluation sets.
+Keep `lambda_l2 > 0` so leaves without observed labels have finite updates.
 
 ```python
 from py_boost import GradientBoosting
@@ -96,22 +98,31 @@ Import these metrics from `py_boost.gpu.losses`:
 | Metric | Result |
 | --- | --- |
 | `NaNBCEMetric` | Mean BCE over observed labels; `return_list=True` gives per-output losses as a CuPy array. |
-| `BCEWithNaNMetricWeighted(output_weights)` | Weighted mean of per-output BCE. `BCEwithNaNMetricWeighted` is an alias. |
+| `BCEWithNaNMetricWeighted(output_weights)` | Weighted mean of per-output BCE. |
 | `NaNAucMetric` | Macro ROC AUC; `return_list=True` gives a NumPy array. |
 | `NaNAucMetricByClass` | Per-output ROC AUC as a NumPy array, for reporting. |
 | `NaNGiniMetricByClass` | Per-output Gini (`2 * AUC - 1`) as a NumPy array, for reporting. |
 | `NaNGiniMetricAtN` | Weighted macro Gini; call with `prod_weights=` and `n=` to restrict to the first `n` target columns. |
 
-All metrics support nonnegative row weights of shape `(n_samples,)` or
+All metrics support finite, nonnegative row weights of shape `(n_samples,)` or
 `(n_samples, 1)`. NaN labels and zero-weight rows are excluded independently
 for each target. ROC AUC/Gini are undefined for outputs without positive
 weight in both classes; BCE is undefined for outputs without any positively
 weighted labels. Per-output results contain NaN for these outputs, and macro
 metrics exclude them. A scalar metric is NaN if no eligible output remains.
-Validate that your evaluation set has enough observed labels for early stopping;
-the per-class vector metrics are for reporting only.
+Positive row weights are rescaled before aggregation so multiplying all
+weights by a common positive constant does not change the metric, subject
+to floating-point precision. All-zero weights produce an undefined metric.
 
-Observed targets must be binary. Predictions must be finite wherever a label
+With early stopping enabled, an undefined (NaN) scalar metric on the last
+evaluation set raises a clear error instead of silently pruning to one tree.
+Choose an evaluation set and metric with enough observed, positively weighted
+labels, or set `es=0` to keep training and record NaN in the evaluation history.
+The per-class vector metrics are for reporting only.
+
+Observed targets must be `0` or `1`; `NaN` is the only missing-label marker.
+Training and evaluation labels are validated once before training, including
+labels on zero-weight rows. Predictions must be finite wherever a label
 has positive row weight; invalid predictions are reported as errors rather
 than treated as missing labels. BCE additionally requires probabilities in
 `[0, 1]`, while ROC AUC/Gini also accept finite decision scores.
@@ -122,6 +133,14 @@ not the outputs with the highest scores. Compared with custom implementations
 that return an unnormalized weighted sum, non-unit-sum weights therefore have
 different semantics. Standard `CrossValidation` is supported; `AdaptiveESCV`
 requires an explicit scorer for missing labels.
+
+`FilterSketch` supports zero Hessians from missing or zero-weight labels.
+Outputs with zero total Hessian are excluded from selection. If all remaining
+output importances are zero, selection uses a uniform distribution over the
+eligible outputs; if none remain, it raises an error identifying the lack of
+positive Hessian mass. The training-column check counts observed labels before
+row weights, so zero-weight observations alone do not make an output eligible
+for `FilterSketch` with `use_hess=True`.
 
 GPU regression tests can be run with `python -m pytest -q tests/test_nan_losses.py`
 after installing Py-Boost, a compatible CuPy build, and pytest.

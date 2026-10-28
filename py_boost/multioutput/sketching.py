@@ -164,7 +164,12 @@ class RandomProjectionSketch(GradSketch):
 
 
 class FilterSketch(GradSketch):
-    """Filter Gradient and Hessian outputs for the tree structure search using previously built trees"""
+    """Filter outputs for tree structure search using previously built trees.
+
+    Outputs with zero Hessian mass are excluded. Zero total importance falls
+    back to a uniform distribution over the remaining outputs. If no output
+    has positive Hessian mass, raise ValueError instead of sampling NaNs.
+    """
 
     def __init__(self, k=1, sample=True, smooth=0.1, ntrees=1):
         """
@@ -226,7 +231,7 @@ class FilterSketch(GradSketch):
         # leaf values
         last_leaves = build_info['data']['train']['last_tree']['leaves']
         self.queue.append(last_leaves)
-        self.max_nodes = max(int(last_leaves.max()), self.max_nodes)
+        self.max_nodes = max(int(last_leaves.max()) + 1, self.max_nodes)
         self.max_trees = max(last_leaves.shape[1], self.max_trees)
 
     def after_train(self, build_info):
@@ -243,13 +248,12 @@ class FilterSketch(GradSketch):
     def _calc_weights(self, grad, hess):
 
         if self.smooth >= 1:
-            return 0
+            return cp.ones(grad.shape[1], dtype=cp.float64)
 
         if len(self.queue) == 0:
-            loss = (grad ** 2).sum(axis=0)
-            loss /= hess.sum(axis=0)
-
-            return loss
+            loss = (grad ** 2).sum(axis=0, dtype=cp.float64)
+            denominator = hess.sum(axis=0, dtype=cp.float64)
+            return cp.where(denominator > 0, loss / cp.where(denominator > 0, denominator, 1), 0)
 
         grad_sum = cp.zeros((len(self.queue), self.max_trees, self.max_nodes,
                              grad.shape[1],), dtype=cp.float32)
@@ -261,26 +265,45 @@ class FilterSketch(GradSketch):
                 grad_sum[n, i].scatter_add(prev_iter[:, i], grad)
                 hess_sum[n, i].scatter_add(prev_iter[:, i], hess)
 
-        loss = (grad_sum ** 2 / (hess_sum + self.lambda_l2)).reshape((-1, grad.shape[1]))
+        denominator = hess_sum + self.lambda_l2
+        loss = cp.where(denominator > 0,
+                        grad_sum ** 2 / cp.where(denominator > 0, denominator, 1), 0)
+        loss = loss.reshape((-1, grad.shape[1]))
 
-        return loss.sum(axis=0)
+        return loss.sum(axis=0, dtype=cp.float64)
 
     def _select(self, pi):
 
         if self.sample:
             idx = cp.random.choice(cp.arange(pi.shape[0]), size=self.k, replace=True, p=pi)
         else:
-            idx = pi.argsort()[-self.k:]
+            candidates = cp.flatnonzero(pi > 0)
+            idx = candidates[pi[candidates].argsort()[-self.k:]]
 
         return idx
 
     def __call__(self, grad, hess):
 
-        pi = self._calc_weights(grad, hess)
-        pi = pi / pi.sum()
+        eligible = cp.broadcast_to(hess.sum(axis=0) > 0, (grad.shape[1],))
+        if not bool(eligible.any()):
+            raise ValueError('FilterSketch cannot select an output: all Hessian sums are zero. '
+                             'Check observed labels and positive sample weights.')
+        uniform = eligible.astype(cp.float64)
+        uniform /= uniform.sum()
+
+        pi = cp.where(eligible, self._calc_weights(grad, hess), 0)
+        if not bool(cp.isfinite(pi).all()) or bool((pi < 0).any()):
+            raise ValueError('FilterSketch output importance must be finite and nonnegative')
+        scale = float(pi.max())
+        if scale > 0:
+            pi /= scale
+            pi /= pi.sum()
+        else:
+            pi = uniform
 
         if self.smooth > 0:
-            pi = self.smooth * cp.ones_like(pi) / grad.shape[1] + (1 - self.smooth) * pi
+            smooth = min(self.smooth, 1)
+            pi = smooth * uniform + (1 - smooth) * pi
 
         idx = self._select(pi)
 

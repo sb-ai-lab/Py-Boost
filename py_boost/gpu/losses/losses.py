@@ -158,16 +158,25 @@ class BCEWithNaNLoss(BCELoss):
     """Binary/multilabel log loss with missing (NaN) targets.
 
     Missing labels contribute zero gradient and Hessian. Initial log odds
-    use only observed labels; an entirely missing output starts at zero
-    (probability 0.5). Use positive lambda_l2 for leaves with no observed
-    labels. The default evaluation metric also ignores missing labels.
+    use only observed labels. Every training output must have at least one
+    observed label; entirely missing evaluation outputs are allowed. Use
+    positive lambda_l2 for leaves with no observed labels. The default
+    evaluation metric also ignores missing labels.
     """
+
+    def preprocess_input(self, y_true):
+        if bool((~cp.isnan(y_true) & (y_true != 0) & (y_true != 1)).any()):
+            raise ValueError('Observed binary targets must be 0 or 1; use NaN for missing labels')
+        return y_true
 
     def base_score(self, y_true):
         observed = ~cp.isnan(y_true)
         counts = observed.sum(axis=0)
-        means = cp.where(observed, y_true, 0).sum(axis=0) / cp.maximum(counts, 1).astype(y_true.dtype)
-        means = cp.where(counts > 0, means, 0.5)
+        missing_outputs = cp.flatnonzero(counts == 0).get().tolist()
+        if missing_outputs:
+            raise ValueError('Training target columns have no observed labels '
+                             f'(zero-based indices): {missing_outputs}')
+        means = cp.where(observed, y_true, 0).sum(axis=0) / counts.astype(y_true.dtype)
         means = cp.clip(means, self.clip_value, 1 - self.clip_value)
         return cp.log(means / (1 - means))
 
