@@ -410,7 +410,7 @@ def test_extreme_weights_with_missing_outputs_and_classes(losses):
 
 @pytest.mark.parametrize('sample', [False, True])
 @pytest.mark.parametrize('smooth', [0., .1, 1.])
-def test_filter_sketch_ignores_zero_weight_training_outputs(losses, training_data, sample, smooth):
+def test_zero_weight_training_outputs_rejected_before_sketch(losses, training_data, sample, smooth):
     from py_boost import GradientBoosting
     from py_boost.multioutput.sketching import FilterSketch
 
@@ -425,10 +425,9 @@ def test_filter_sketch_ignores_zero_weight_training_outputs(losses, training_dat
     probabilities = []
     model = GradientBoosting('bce_nan', ntrees=3, max_depth=2, max_bin=16, es=0, verbose=100,
                              use_hess=True, multioutput_sketch=RecordingSketch(k=2, sample=sample, smooth=smooth))
-    model.fit(X, y, sample_weight=weights, eval_sets=[dict(X=X, y=y)])
-    np.testing.assert_allclose(probabilities, [[1., 0.]] * 3)
-    assert np.isfinite(model.predict(X)).all()
-    assert np.isfinite(model.history).all()
+    with pytest.raises(ValueError, match=r'no observed labels.*\[1\]'):
+        model.fit(X, y, sample_weight=weights, eval_sets=[dict(X=X, y=y)])
+    assert probabilities == []
 
 
 def test_filter_sketch_rejects_all_zero_training_weights(losses, training_data):
@@ -438,7 +437,7 @@ def test_filter_sketch_rejects_all_zero_training_weights(losses, training_data):
     X, y = training_data
     model = GradientBoosting('bce_nan', ntrees=2, max_bin=16, verbose=100,
                              use_hess=True, multioutput_sketch=FilterSketch())
-    with pytest.raises(ValueError, match='FilterSketch cannot select.*all Hessian sums are zero'):
+    with pytest.raises(ValueError, match=r'no observed labels.*\[0, 1\]'):
         model.fit(X, y, sample_weight=np.zeros(len(y), dtype=np.float32))
 
 

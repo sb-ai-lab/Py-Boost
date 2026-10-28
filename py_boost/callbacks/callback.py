@@ -218,7 +218,11 @@ class EvalHistory(Callback):
 
 
 class EarlyStopping(Callback):
-    """Callback for early stopping"""
+    """Stop using the last validation set's scalar metric.
+
+    With early stopping enabled, an undefined (NaN) score raises ValueError.
+    Set num_rounds=0 to disable early stopping and this check.
+    """
 
     def __init__(self, num_rounds=100):
 

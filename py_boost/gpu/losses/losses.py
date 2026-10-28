@@ -8,6 +8,7 @@ except Exception:
     CUDA_FOUND = False
 
 from .metrics import metric_alias, RMSEMetric, RMSLEMetric, BCEMetric, NaNBCEMetric, NaNAucMetric
+from .metrics import _row_weights, _rescale_row_weights
 from .multiclass_metrics import multiclass_metric_alias, CrossEntropyMetric
 
 
@@ -46,6 +47,21 @@ class Loss:
 
         """
         return y_true
+
+    def prepare_input(self, y_true, sample_weight=None, training=False):
+        """Prepare a dataset using the existing float32 preprocessing contract.
+
+        Losses may override this to validate values before conversion or
+        retain higher precision for evaluation weights.
+        """
+        y_true = cp.array(y_true, order='C', dtype=cp.float32)
+        if sample_weight is not None:
+            sample_weight = cp.array(sample_weight, order='C', dtype=cp.float32)
+        return self.preprocess_input(y_true), sample_weight
+
+    def initial_score(self, y_true, sample_weight=None):
+        """Initialize while preserving existing base_score(y_true) overrides."""
+        return self.base_score(y_true)
 
     def postprocess_output(self, y_pred):
         """Method defines how to postprocess sum of trees to output prediction (ex. apply sigmoid for BCELoss)
@@ -158,25 +174,63 @@ class BCEWithNaNLoss(BCELoss):
     """Binary/multilabel log loss with missing (NaN) targets.
 
     Missing labels contribute zero gradient and Hessian. Initial log odds
-    use only observed labels. Every training output must have at least one
-    observed label; entirely missing evaluation outputs are allowed. Use
-    positive lambda_l2 for leaves with no observed labels. The default
-    evaluation metric also ignores missing labels.
+    use weighted observed-label frequencies. Every training output must have
+    an observed label with positive row weight. Evaluation outputs may be
+    entirely missing. Use positive lambda_l2 for leaves with no observed
+    labels. The default evaluation metric also ignores missing labels.
     """
 
     def preprocess_input(self, y_true):
-        if bool((~cp.isnan(y_true) & (y_true != 0) & (y_true != 1)).any()):
+        observed = ~cp.isnan(y_true)
+        if bool((observed & (y_true != 0) & (y_true != 1)).any()):
             raise ValueError('Observed binary targets must be 0 or 1; use NaN for missing labels')
         return y_true
 
-    def base_score(self, y_true):
+    def prepare_input(self, y_true, sample_weight=None, training=False):
+        # Validate labels in their original dtype, before rounding to float32.
+        y_true = self.preprocess_input(cp.asarray(y_true))
+        if sample_weight is not None:
+            sample_weight = _row_weights(sample_weight, y_true.shape[0])
+            if training:
+                converted = sample_weight.astype(cp.float32)
+                invalid = ~cp.isfinite(converted) | ((sample_weight > 0) & (converted == 0))
+                if bool(invalid.any()):
+                    rows = cp.flatnonzero(invalid[:, 0]).get().tolist()
+                    raise ValueError(
+                        'Training sample_weight cannot be represented in float32 '
+                        'without overflow or loss of positive weights; affected rows: '
+                        f'{rows}'
+                    )
+                sample_weight = converted
+            # Evaluation weights stay float64 for stable metric aggregation.
+            sample_weight = cp.array(sample_weight, order='C')
+        return cp.array(y_true, order='C', dtype=cp.float32), sample_weight
+
+    def initial_score(self, y_true, sample_weight=None):
+        return self.base_score(y_true, sample_weight)
+
+    def base_score(self, y_true, sample_weight=None):
+        y_true = cp.asarray(y_true)
+        if y_true.ndim == 1:
+            y_true = y_true[:, None]
         observed = ~cp.isnan(y_true)
+        if sample_weight is not None:
+            weights = _row_weights(sample_weight, y_true.shape[0])
+            observed &= weights > 0
         counts = observed.sum(axis=0)
-        missing_outputs = cp.flatnonzero(counts == 0).get().tolist()
-        if missing_outputs:
-            raise ValueError('Training target columns have no observed labels '
-                             f'(zero-based indices): {missing_outputs}')
-        means = cp.where(observed, y_true, 0).sum(axis=0) / counts.astype(y_true.dtype)
+        missing_outputs = cp.flatnonzero(counts == 0)
+        if missing_outputs.size:
+            raise ValueError(
+                'Training target columns have no observed labels '
+                f'(zero-based indices): {missing_outputs.get().tolist()} '
+                '(positive sample weight required)'
+            )
+        if sample_weight is None:
+            means = cp.where(observed, y_true, 0).sum(axis=0) / counts
+        else:
+            weights = _rescale_row_weights(cp.where(observed, weights, 0))
+            means = (cp.where(observed, y_true, 0) * weights).sum(axis=0) / weights.sum(axis=0)
+        means = means.astype(cp.result_type(y_true.dtype, cp.float32))
         means = cp.clip(means, self.clip_value, 1 - self.clip_value)
         return cp.log(means / (1 - means))
 

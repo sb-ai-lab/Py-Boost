@@ -208,6 +208,28 @@ class RocAucMetric(Metric):
         return v0 > v1
 
 
+def _row_weights(sample_weight, n_samples):
+    """Validate row weights without losing their original floating-point range."""
+    if sample_weight is None:
+        return cp.ones((n_samples, 1), dtype=cp.float64)
+    weights = cp.asarray(sample_weight, dtype=cp.float64)
+    if weights.ndim == 1:
+        weights = weights[:, None]
+    if weights.shape != (n_samples, 1):
+        raise ValueError('sample_weight must have shape (n_samples,) or (n_samples, 1)')
+    if not bool(cp.isfinite(weights).all()) or bool((weights < 0).any()):
+        raise ValueError('sample_weight must be finite and nonnegative')
+    return weights
+
+
+def _rescale_row_weights(weights):
+    """Rescale each output independently after excluding its missing labels."""
+    if weights.shape[0] == 0:
+        return weights
+    scale = weights.max(axis=0, keepdims=True)
+    return weights / cp.where(scale > 0, scale, 1)
+
+
 def _nan_metric_inputs(y_true, y_pred, sample_weight):
     """Validate shapes and prepare row weights for metrics with missing labels."""
     y_true, y_pred = cp.asarray(y_true), cp.asarray(y_pred)
@@ -218,16 +240,7 @@ def _nan_metric_inputs(y_true, y_pred, sample_weight):
     if y_true.ndim != 2 or y_true.shape != y_pred.shape or y_true.shape[1] == 0:
         raise ValueError('Targets and predictions must have the same nonempty output dimension')
 
-    if sample_weight is None:
-        weights = cp.ones((y_true.shape[0], 1), dtype=cp.float64)
-    else:
-        weights = cp.asarray(sample_weight, dtype=cp.float64)
-        if weights.ndim == 1:
-            weights = weights[:, None]
-        if weights.shape != (y_true.shape[0], 1):
-            raise ValueError('sample_weight must have shape (n_samples,) or (n_samples, 1)')
-        if not bool(cp.isfinite(weights).all()) or bool((weights < 0).any()):
-            raise ValueError('sample_weight must be finite and nonnegative')
+    weights = _row_weights(sample_weight, y_true.shape[0])
     observed = ~cp.isnan(y_true) & (weights > 0)
     if bool((observed & (y_true != 0) & (y_true != 1)).any()):
         raise ValueError('Observed binary targets must be 0 or 1')
@@ -253,9 +266,16 @@ def _nan_weighted_mean(values, weights=None):
     valid = ~np.isnan(values) & (weights > 0)
     if not valid.any():
         return float('nan')
+    selected = values[valid]
+    # Positive original weights retain infinite errors even if their
+    # normalized values would underflow to zero.
+    if np.isposinf(selected).any():
+        return float('nan') if np.isneginf(selected).any() else float('inf')
+    if np.isneginf(selected).any():
+        return float('-inf')
     # Rescale first to avoid overflow for large finite output weights.
     weights = weights[valid] / weights[valid].max()
-    return float(np.sum(values[valid] * weights) / weights.sum())
+    return float(np.sum(selected * weights) / weights.sum())
 
 
 class NaNBCEMetric(BCEMetric):
