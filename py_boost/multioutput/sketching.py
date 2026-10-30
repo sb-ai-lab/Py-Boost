@@ -252,14 +252,14 @@ class FilterSketch(GradSketch):
             return cp.ones(grad.shape[1], dtype=cp.float64)
 
         if len(self.queue) == 0:
-            loss = cp.square(grad, dtype=cp.float64).sum(axis=0)
+            loss = (grad ** 2).sum(axis=0, dtype=cp.float64)
             denominator = hess.sum(axis=0, dtype=cp.float64)
             return cp.where(denominator > 0, loss / cp.where(denominator > 0, denominator, 1), 0)
 
         grad_sum = cp.zeros((len(self.queue), self.max_trees, self.max_nodes,
-                             grad.shape[1],), dtype=cp.float64)
+                             grad.shape[1],), dtype=cp.float32)
         hess_sum = cp.zeros((len(self.queue), self.max_trees, self.max_nodes,
-                             hess.shape[1],), dtype=cp.float64)
+                             hess.shape[1],), dtype=cp.float32)
 
         for n, prev_iter in enumerate(self.queue):
             for i in range(prev_iter.shape[1]):

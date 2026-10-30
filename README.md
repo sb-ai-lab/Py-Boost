@@ -145,9 +145,15 @@ Outputs with zero total Hessian are excluded from selection. If all remaining
 output importances are zero, selection uses a uniform distribution over the
 eligible outputs; if none remain, it raises an error identifying the lack of
 positive Hessian mass. The separate training-column check requires an observed
-label with positive row weight in each training output. Importance squaring and
-accumulation use float64 to avoid float32 overflow and underflow. Zero gradients
-at an optimum are valid and do not trigger a missing-training-label error.
+label with positive row weight in each training output. Gradient squaring and
+per-leaf accumulation use float32 to limit GPU memory; reductions and probability
+normalization use float64. With the default BCE clipping and ordinary row
+weights, gradient magnitudes are well within the float32 range. Extreme weights
+or gradient scales can still cause overflow or underflow during squaring, and
+roundoff can affect importance estimates when leaf gradients nearly cancel.
+Float64 reductions do not remove these float32 training limitations. Zero
+gradients at an optimum are valid and do not trigger a missing-training-label
+error.
 
 For `BCEWithNaNLoss`, row weights are validated as finite and nonnegative
 before conversion. Training weights are stored as float32: overflow to infinity

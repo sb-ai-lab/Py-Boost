@@ -83,8 +83,8 @@ def test_extreme_evaluation_weights_through_fit(gpu, data, weight, metric):
 
 
 @pytest.mark.parametrize('stage', ['initial', 'queued'])
-@pytest.mark.parametrize('factor', [1., 1e-30, 1e20])
-def test_filter_importance_precision(gpu, stage, factor):
+@pytest.mark.parametrize('factor', [1e-3, 1., 1e3])
+def test_filter_importance_with_moderate_scales(gpu, stage, factor):
     from py_boost.multioutput.sketching import FilterSketch
     cp = gpu
     sketch = FilterSketch(1, smooth=0)
