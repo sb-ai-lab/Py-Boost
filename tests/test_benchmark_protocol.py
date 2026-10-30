@@ -164,6 +164,23 @@ def test_cli_rejects_multiple_gpu_ids_before_starting_workers(monkeypatch, tmp_p
     assert not output.exists()
 
 
+def test_gpu_index_is_resolved_to_physical_uuid(monkeypatch):
+    commands = []
+    def query(command, **kwargs):
+        commands.append(command)
+        return 'GPU-selected\n'
+    monkeypatch.setattr(runner.subprocess, 'check_output', query)
+    assert runner.resolve_gpu('1') == 'GPU-selected'
+    assert commands == [['nvidia-smi', '-i', '1', '--query-gpu=uuid', '--format=csv,noheader']]
+
+
+@pytest.mark.parametrize('response', ['', 'GPU-a\nGPU-b\n', 'MIG-instance\n'])
+def test_gpu_selector_must_resolve_to_one_physical_card(monkeypatch, response):
+    monkeypatch.setattr(runner.subprocess, 'check_output', lambda *args, **kwargs: response)
+    with pytest.raises(ValueError, match='exactly one physical GPU'):
+        runner.resolve_gpu('selector')
+
+
 def test_live_memory_tracking_handles_reuse_and_preexisting_allocations():
     tracker = memory_tracker(SimpleNamespace(cuda=SimpleNamespace(MemoryHook=object)))
     tracker.free_postprocess(0, 512, 1, 999)  # Allocated before the tracked scope.

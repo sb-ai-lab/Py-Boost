@@ -76,7 +76,9 @@ git worktree add --detach ../Py-Boost-v0.5.2 v0.5.2
 Commit changes to `py_boost/` or `pyproject.toml` first: dirty library sources are
 rejected. **Exactly one physical GPU is used for the entire run.** Use a physical
 GPU index or UUID (`nvidia-smi -L`). `--device 1` selects only physical GPU #1; it
-is exposed inside each worker as logical `cuda:0` through `CUDA_VISIBLE_DEVICES`.
+is resolved to its physical UUID and exposed inside each worker as logical
+`cuda:0` through `CUDA_VISIBLE_DEVICES`. UUID selection avoids differences between
+CUDA and `nvidia-smi` ordinal ordering.
 A comma-separated GPU list is rejected, and workers verify that exactly one CUDA
 device is visible. Cases, versions and measurement phases run sequentially.
 Do not share the selected GPU with another workload. Preflight performs a real allocation/kernel, rejects other

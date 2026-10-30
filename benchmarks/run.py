@@ -53,6 +53,16 @@ def source_info(source):
             'library_hash': digest.hexdigest()}
 
 
+def resolve_gpu(selector):
+    """Use a physical UUID: CUDA and nvidia-smi ordinal ordering can differ."""
+    devices = subprocess.check_output(
+        ['nvidia-smi', '-i', selector, '--query-gpu=uuid', '--format=csv,noheader'],
+        text=True).strip().splitlines()
+    if len(devices) != 1 or not devices[0].startswith('GPU-'):
+        raise ValueError('Select exactly one physical GPU index or UUID')
+    return devices[0]
+
+
 def environment(cp, np, psutil, device):
     if cp.cuda.runtime.getDeviceCount() != 1:
         raise RuntimeError('Exactly one visible CUDA device is required')
@@ -264,6 +274,7 @@ def run(args):
         raise ValueError('Repeats and timeout must be positive')
     if ',' in args.device or not args.device:
         raise ValueError('Select exactly one GPU index or UUID')
+    device = resolve_gpu(args.device)
     cases = [c for c in suite['cases'] if c['id'] in selected]
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -280,7 +291,7 @@ def run(args):
                   'full_suite': len(cases) == len(suite['cases']),
                   'repeats': args.repeats, 'warmups': suite['warmups'],
                   'suite': suite, 'cases': {}, 'complete': False}
-        job = dict(source=source, phase='metadata', device=args.device, suite=suite)
+        job = dict(source=source, phase='metadata', device=device, suite=suite)
         probe = invoke(args.python, directory / 'raw' / 'metadata', job, args.timeout)
         if probe['status'] != 'ok':
             report['error'] = probe
@@ -297,7 +308,7 @@ def run(args):
             order.reverse()
         for i in order:
             print(f'{sources[i]["commit"][:12]} {case["id"]}', flush=True)
-            job = dict(source=sources[i], phase='case', device=args.device, suite=suite,
+            job = dict(source=sources[i], phase='case', device=device, suite=suite,
                        case=case, repeats=args.repeats)
             record = invoke(args.python, directories[i] / 'raw' / case['id'], job, args.timeout)
             if record['status'] == 'ok' and record['environment'] != reports[i]['environment']:
