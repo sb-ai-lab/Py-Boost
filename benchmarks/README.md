@@ -10,25 +10,36 @@ of the directory containing the harness.
 
 Definitions are in `suite-v1.json`. All cases build **32 iterations**, use learning
 rate 0.1, seed 42, full row/column sampling, and `use_hess=True`. Defaults are depth
-4 and 64 bins. Sketch cases keep 8 outputs for structure search. Early stopping is
-disabled. The benchmark counts executed iterations and separately records retained
+4 and 64 bins. Every sketch case explicitly sets **`sketch_outputs=8`**.
+Here **K** is the original number of outputs and **k=8** is the sketch width used
+only for structure search; final predictions still contain all K outputs:
+
+- `proj`: eight projected components combining the original outputs.
+- `rand`: eight output draws with replacement, so at most eight distinct outputs.
+- `filter`: eight importance-weighted output draws with replacement, so at most
+  eight distinct outputs.
+- `topk`: eight distinct outputs with the largest gradient norms.
+- Full `GradientBoosting`: all K outputs, without a sketch.
+
+Early stopping is disabled. The benchmark counts executed iterations and
+separately records retained
 trees: existing Py-Boost versions can prune to the best validation iteration even
 with `es=0`. Different retained tree counts are disclosed in comparisons.
 
-| Case | Train / validation / test rows | Features | Outputs | Model |
-|---|---:|---:|---:|---|
-| mse-single | 16384 / 4096 / 4096 | 32 | 1 | GradientBoosting |
-| mse-full-128 | 8192 / 2048 / 2048 | 32 | 128 | GradientBoosting |
-| mse-proj-32 | 16384 / 4096 / 4096 | 32 | 32 | SketchBoost/proj |
-| mse-proj-128 | 16384 / 4096 / 4096 | 32 | 128 | SketchBoost/proj |
-| mse-proj-1024 | 16384 / 4096 / 4096 | 32 | 1024 | SketchBoost/proj |
-| mse-proj-10000 | 16384 / 4096 / 4096 | 32 | 10000 | SketchBoost/proj |
-| bce-rand-1024 | 16384 / 4096 / 4096 | 32 | 1024 | SketchBoost/rand |
-| bce-filter-1024 | 16384 / 4096 / 4096 | 32 | 1024 | SketchBoost/filter |
-| mse-topk-10000 | 4096 / 1024 / 1024 | 32 | 10000 | SketchBoost/topk |
-| ce-proj-512 | 16384 / 4096 / 4096 | 32 | 512 classes | SketchBoost/proj |
-| validation-proj-1024 | 8192 / 32768 / 4096 | 32 | 1024 | SketchBoost/proj; two validation sets |
-| histogram-topk-128 | 8192 / 2048 / 2048 | 128 | 128 | SketchBoost/topk; depth 8, 256 bins |
+| Case | Train / validation / test rows | Features | Outputs K | Sketch width k | Model |
+|---|---:|---:|---:|---:|---|
+| mse-single | 16384 / 4096 / 4096 | 32 | 1 | all | GradientBoosting |
+| mse-full-128 | 8192 / 2048 / 2048 | 32 | 128 | all | GradientBoosting |
+| mse-proj-32 | 16384 / 4096 / 4096 | 32 | 32 | 8 | SketchBoost/proj |
+| mse-proj-128 | 16384 / 4096 / 4096 | 32 | 128 | 8 | SketchBoost/proj |
+| mse-proj-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 8 | SketchBoost/proj |
+| mse-proj-10000 | 16384 / 4096 / 4096 | 32 | 10000 | 8 | SketchBoost/proj |
+| bce-rand-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 8 | SketchBoost/rand |
+| bce-filter-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 8 | SketchBoost/filter |
+| mse-topk-10000 | 4096 / 1024 / 1024 | 32 | 10000 | 8 | SketchBoost/topk |
+| ce-proj-512 | 16384 / 4096 / 4096 | 32 | 512 classes | 8 | SketchBoost/proj |
+| validation-proj-1024 | 8192 / 32768 / 4096 | 32 | 1024 | 8 | SketchBoost/proj; two validation sets |
+| histogram-topk-128 | 8192 / 2048 / 2048 | 128 | 128 | 8 | SketchBoost/topk; depth 8, 256 bins |
 
 The four `mse-proj-*` cases change only the number of outputs. Other cases exercise
 full-output scoring, separate/shared Hessians, wide targets, validation memory,
@@ -63,13 +74,22 @@ git worktree add --detach ../Py-Boost-v0.5.2 v0.5.2
 ```
 
 Commit changes to `py_boost/` or `pyproject.toml` first: dirty library sources are
-rejected. Use a physical GPU index or UUID (`nvidia-smi -L`). Do not share that GPU
-with another workload. Preflight performs a real allocation/kernel, rejects other
+rejected. **Exactly one physical GPU is used for the entire run.** Use a physical
+GPU index or UUID (`nvidia-smi -L`). `--device 1` selects only physical GPU #1; it
+is exposed inside each worker as logical `cuda:0` through `CUDA_VISIBLE_DEVICES`.
+A comma-separated GPU list is rejected, and workers verify that exactly one CUDA
+device is visible. Cases, versions and measurement phases run sequentially.
+Do not share the selected GPU with another workload. Preflight performs a real allocation/kernel, rejects other
 compute processes on the GPU, and records its UUID. CPU thread counts are fixed at
 4. No GPU is a failure, not a skipped or CPU-emulated benchmark.
 
 Each source produces `<output>/<commit-prefix>/results.json` and raw worker
-requests/results/logs. Two-source runs also produce `comparison.md`. More than two
+requests/results/logs. GPU count, model, physical and CUDA-visible VRAM, UUID,
+PCI bus, compute capability, SM count, memory bus width, power limit, maximum SM
+clock and NVIDIA/CUDA driver/runtime versions are recorded
+in JSON and displayed in the comparison report. Each comparison row shows the
+full output count K and sketch width k/method explicitly.
+Two-source runs also produce `comparison.md`. More than two
 sources may be measured in one run; compare any two results afterward:
 
 ```bash
@@ -116,7 +136,7 @@ reported as failed, not silently replaced by another implementation.
 
 Reports identify the exact library commit and library-source checksum, benchmark
 implementation checksum, manifest checksum, actual dataset checksum, GPU UUID,
-  CPU/OS, Python, relevant dependency versions, CUDA driver/runtime, repetitions and
+CPU/OS, Python, relevant dependency versions, CUDA driver/runtime, repetitions and
 warmups. `compare` refuses mismatched workloads, datasets, environments or failed
 measurements (exit code 2). Partial runs are marked `full_suite: false`; only a full
 five-repeat run satisfies the PR requirement. Comparison tables show measured

@@ -18,7 +18,8 @@ _spec.loader.exec_module(_package)
 
 from pyboost_benchmark_suite.gpu import memory_tracker
 from pyboost_benchmark_suite.protocol import comparison_errors, load_suite, make_data, quality
-from pyboost_benchmark_suite.run import render_comparison
+from pyboost_benchmark_suite.run import environment, render_comparison
+from pyboost_benchmark_suite import run as runner
 
 
 def small_case(task='regression'):
@@ -69,7 +70,13 @@ def report():
                   quality={'median': .2}, measurements=[{'retained_trees': 32}])
     return dict(schema_version=1, benchmark_id='pyboost-gpu-v1', implementation_hash='abc',
                 suite_hash='def', case_ids=['test'], repeats=5, warmups=1, complete=True,
-                environment={'gpu': 'A100', 'packages': {'numpy': '2'}},
+                environment={'gpu_count': 1, 'gpu': {'name': 'NVIDIA A100 80GB PCIe',
+                'uuid': 'GPU-test', 'vram_bytes': 80 * 2**30, 'compute_capability': [8, 0],
+                'physical_vram_bytes': 80 * 2**30, 'power_limit_watts': '300',
+                'max_sm_clock_mhz': '1410',
+                'pci_bus_id': '00000000:14:00.0', 'multiprocessors': 108,
+                'memory_bus_width_bits': 5120, 'driver_version': '550.163.01'},
+                'cuda_driver': 12040, 'cuda_runtime': 12090, 'packages': {'numpy': '2'}},
                 source={'commit': 'abc'}, cases={'test': dict(status='ok', data_hash='123',
                 spec={'outputs': 1024}, timing=timing, memory={'fit_cupy_peak_bytes': 2**20})})
 
@@ -112,6 +119,49 @@ def test_comparison_preserves_direction_and_discloses_tree_count_changes():
     assert '+50.0%' in text
     assert '-50.0%' in text
     assert 'Retained tree counts differ' in text
+
+
+def test_report_displays_single_gpu_characteristics():
+    text = render_comparison(report(), report())
+    for value in ['GPU count: 1', 'NVIDIA A100 80GB PCIe', '80.0 GiB',
+                  'GPU-test', '8.0', '108', '5120', '550.163.01', '12.4', '12.9',
+                  '300 W', '1410 MHz']:
+        assert value in text
+
+
+@pytest.mark.parametrize('method', ['proj', 'rand', 'filter', 'topk'])
+def test_report_distinguishes_target_dimension_from_sketch_width(method):
+    base, candidate = report(), report()
+    for result in [base, candidate]:
+        result['cases']['test']['spec'] = dict(outputs=10000, params=dict(
+            sketch_method=method, sketch_outputs=8))
+    text = render_comparison(base, candidate)
+    assert '| test | 10000 | 8 (' + method + ') |' in text
+    assert 'at most k distinct outputs' in text
+    assert 'Predictions always have K outputs' in text
+
+
+def test_report_shows_full_output_scoring_without_sketch():
+    text = render_comparison(report(), report())
+    assert '| test | 1024 | all 1024 |' in text
+
+
+@pytest.mark.parametrize('count', [0, 2])
+def test_preflight_rejects_any_visible_gpu_count_other_than_one(count):
+    cp = SimpleNamespace(cuda=SimpleNamespace(runtime=SimpleNamespace(getDeviceCount=lambda: count)))
+    with pytest.raises(RuntimeError, match='Exactly one visible CUDA device'):
+        environment(cp, np, None, '0')
+
+
+def test_cli_rejects_multiple_gpu_ids_before_starting_workers(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, 'source_info', lambda path: dict(commit='abc', path=str(path)))
+    monkeypatch.setattr(runner, 'invoke', lambda *args: pytest.fail('Worker must not start'))
+    output = tmp_path / 'results'
+    args = SimpleNamespace(source=['checkout'], case=None, repeats=5, timeout=900,
+                           device='0,1', output=str(output))
+    with pytest.raises(ValueError, match='exactly one GPU'):
+        runner.run(args)
+    assert not output.exists()
 
 
 def test_live_memory_tracking_handles_reuse_and_preexisting_allocations():

@@ -14,6 +14,9 @@ with a single sketch method, a small-output case, or an improvised timing script
   checksums. Verify that the imported library comes from the intended checkout.
 - Run `benchmarks/run.py run` with both source paths, an explicit device and a new
   output directory. A missing GPU, failed case, timeout or OOM is not a pass.
+- Use exactly one physical GPU. Never run benchmark cases or versions in parallel
+  on multiple GPUs. Publish its model, VRAM, UUID, compute capability and driver
+  versions in the report, plus full output count K and sketch width k per case.
 - Use `benchmarks/run.py compare` to produce the report; do not compare mismatched
   environments/workloads. Inspect time, peak live CuPy bytes, CPU RSS, holdout
   quality, executed iterations and retained tree counts.

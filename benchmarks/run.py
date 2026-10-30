@@ -59,8 +59,14 @@ def environment(cp, np, psutil, device):
     cp.zeros(1).sum().item()  # A real allocation and kernel; no CPU fallback.
     props = cp.cuda.runtime.getDeviceProperties(0)
     name = props['name']
-    uuid = subprocess.check_output(
-        ['nvidia-smi', '-i', device, '--query-gpu=uuid', '--format=csv,noheader'], text=True).strip()
+    gpu_details = subprocess.check_output(
+        ['nvidia-smi', '-i', device,
+         '--query-gpu=uuid,driver_version,pci.bus_id,memory.total,power.limit,clocks.max.sm',
+         '--format=csv,noheader,nounits'], text=True).strip()
+    if '\n' in gpu_details:
+        raise RuntimeError('GPU selector resolved to more than one physical device')
+    uuid, driver_version, pci_bus_id, memory_mib, power_limit, max_sm_clock = [
+        part.strip() for part in gpu_details.split(',')]
     processes = subprocess.check_output(
         ['nvidia-smi', '--query-compute-apps=gpu_uuid,pid', '--format=csv,noheader,nounits'],
         text=True)
@@ -83,9 +89,14 @@ def environment(cp, np, psutil, device):
                     Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')), cpu)
     return {'python': platform.python_version(), 'platform': platform.platform(),
             'cpu': cpu, 'cpu_threads': int(os.environ['NUMBA_NUM_THREADS']),
-            'host_ram_bytes': psutil.virtual_memory().total,
+            'host_ram_bytes': psutil.virtual_memory().total, 'gpu_count': 1,
             'gpu': {'name': name.decode() if isinstance(name, bytes) else name,
                     'uuid': uuid, 'vram_bytes': props['totalGlobalMem'],
+                    'driver_version': driver_version, 'pci_bus_id': pci_bus_id,
+                    'physical_vram_bytes': int(float(memory_mib) * 2**20),
+                    'power_limit_watts': power_limit, 'max_sm_clock_mhz': max_sm_clock,
+                    'multiprocessors': props['multiProcessorCount'],
+                    'memory_bus_width_bits': props.get('memoryBusWidth'),
                     'compute_capability': [props['major'], props['minor']]},
             'cuda_driver': cp.cuda.runtime.driverGetVersion(),
             'cuda_runtime': cp.cuda.runtime.runtimeGetVersion(), 'packages': packages}
@@ -308,11 +319,25 @@ def render_comparison(base, head):
              f'Base: `{base["source"]["commit"]}`; candidate: `{head["source"]["commit"]}`.', '']
     if errors:
         return '\n'.join(lines + ['**Not comparable:**'] + [f'- {e}' for e in errors]) + '\n'
-    lines += ['Times are warmed wall-clock medians. GPU memory is peak live CuPy allocations,',
+    env = base['environment']
+    gpu = env['gpu']
+    capability = '.'.join(str(part) for part in gpu['compute_capability'])
+    def cuda_version(value):
+        return f'{value // 1000}.{value % 1000 // 10}'
+    lines += [f'**GPU count: {env.get("gpu_count", "not recorded")}**; versions and cases execute sequentially.',
+              f'GPU: **{gpu["name"]}**; physical VRAM: **{gpu.get("physical_vram_bytes", gpu["vram_bytes"]) / 2**30:.1f} GiB**; CUDA-visible: **{gpu["vram_bytes"] / 2**30:.1f} GiB**; compute capability: **{capability}**.',
+              f'UUID: `{gpu["uuid"]}`; PCI bus: `{gpu.get("pci_bus_id", "not recorded")}`.',
+              f'SMs: {gpu.get("multiprocessors", "not recorded")}; memory bus: {gpu.get("memory_bus_width_bits", "not recorded")} bits; NVIDIA driver: {gpu.get("driver_version", "not recorded")}.',
+              f'Power limit: {gpu.get("power_limit_watts", "not recorded")} W; max SM clock: {gpu.get("max_sm_clock_mhz", "not recorded")} MHz.',
+              f'CUDA driver API: {cuda_version(env["cuda_driver"])}; CUDA runtime: {cuda_version(env["cuda_runtime"])}.', '',
+              'K is the full target dimension; k is the sketch width used for structure search.',
+              '`proj`: k projected components; `rand`/`filter`: k draws with replacement (at most k distinct outputs);',
+              '`topk`: k distinct outputs. Full GradientBoosting uses all K outputs. Predictions always have K outputs.', '',
+              'Times are warmed wall-clock medians. GPU memory is peak live CuPy allocations,',
               'including the private fit pool; CUDA context, pool cache and external library allocations are excluded.',
               'Quality is a holdout metric (lower is better). These are measured changes, not statistical verdicts.', '',
-              '| Case | Fit s (base → PR) | Δ fit | Predict s (base → PR) | Δ predict | Fit MiB (base → PR) | Δ memory | Quality (base → PR) |',
-              '|---|---:|---:|---:|---:|---:|---:|---:|']
+              '| Case | Outputs K | Sketch k | Fit s (base → PR) | Δ fit | Predict s (base → PR) | Δ predict | Fit MiB (base → PR) | Δ memory | Quality (base → PR) |',
+              '|---|---:|---|---:|---:|---:|---:|---:|---:|---:|']
     notes = []
     for case_id in base['case_ids']:
         a, b = base['cases'][case_id], head['cases'][case_id]
@@ -327,7 +352,10 @@ def render_comparison(base, head):
         mem, dm = pair('memory', 'fit_cupy_peak_bytes', 2**20)
         qa = a['timing']['quality']['median']
         qb = b['timing']['quality']['median']
-        lines.append(f'| {case_id} | {fit} | {df} | {pred} | {dp} | {mem} | {dm} | {qa:.6g} → {qb:.6g} |')
+        spec = a['spec']
+        sketch = spec.get('params', {}).get('sketch_method')
+        sketch_width = f'{spec["params"]["sketch_outputs"]} ({sketch})' if sketch else f'all {spec["outputs"]}'
+        lines.append(f'| {case_id} | {spec["outputs"]} | {sketch_width} | {fit} | {df} | {pred} | {dp} | {mem} | {dm} | {qa:.6g} → {qb:.6g} |')
         ra = [m['retained_trees'] for m in a['timing']['measurements']]
         rb = [m['retained_trees'] for m in b['timing']['measurements']]
         if len(set(ra + rb)) > 1:
