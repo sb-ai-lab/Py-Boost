@@ -1,5 +1,6 @@
 """CPU integration tests using real Treelite models and compiled TL2cgen libraries."""
 
+import copy
 import os
 import shutil
 import sys
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 import joblib
 import numpy as np
 import pytest
+from scipy import sparse
 
 from py_boost import TLCompiledPredictor, TLPredictor
 
@@ -95,6 +97,73 @@ def compiled(ensemble, tmp_path_factory, toolchain):
         name, tmp_path / ('model' + suffix), params={'parallel_comp': 2},
         nthread=2, predictor_params={'nthread': 1},
     )
+
+
+@pytest.fixture(scope='module')
+def sparse_compiled(ensemble, tmp_path_factory, toolchain):
+    model = CPUEnsemble(len(ensemble.base_score))
+    # Explicit zero goes left; a missing sparse entry goes right at this node.
+    model.models[0].test_format[5] = .25
+    name, suffix = toolchain
+    path = tmp_path_factory.mktemp('sparse_compiled') / ('model' + suffix)
+    return TLPredictor(model).compile(name, path, params={'parallel_comp': 1}, nthread=2)
+
+
+@pytest.mark.parametrize('format', ['csr', 'csc', 'coo'])
+@pytest.mark.parametrize('dtype', [np.float32, np.float64])
+@pytest.mark.parametrize('index_dtype', [np.int32, np.int64])
+def test_compiled_sparse_inputs(ensemble, sparse_compiled, format, dtype, index_dtype,
+                               monkeypatch):
+    # Keep explicit zeros. Unstored entries represent missing values, not zeros.
+    X = sparse.csr_matrix((np.array([0, 0, 1, -1, 0, -1, 0, np.nan, np.nan, -1], dtype=dtype),
+                           [1, 0, 0, 1, 0, 1, 0, 1, 0, 1],
+                           [0, 1, 2, 3, 4, 4, 6, 8, 10]), shape=(8, 2)).asformat(format)
+    if format == 'coo':
+        X.row = X.row.astype(index_dtype)
+        X.col = X.col.astype(index_dtype)
+    else:
+        X.indices = X.indices.astype(index_dtype)
+        X.indptr = X.indptr.astype(index_dtype)
+    original = copy.deepcopy(X)
+
+    def no_dense(*args, **kwargs):
+        pytest.fail('Sparse prediction must not densify its input')
+
+    for cls in (sparse.csr_matrix, sparse.csc_matrix, sparse.coo_matrix):
+        monkeypatch.setattr(cls, 'toarray', no_dense)
+
+    expected = np.array([
+        [2, -4, 5.5], [4, 2, 4], [-4, 4, 7], [2, -4, 5.5],
+        [4, 2, 4], [2, -4, 5.5], [4, 2, 4], [2, -4, 5.5],
+    ], dtype=np.float32)[:, :len(ensemble.base_score)]
+    actual = sparse_compiled.predict(X)
+    assert actual.dtype == np.float32
+    np.testing.assert_allclose(actual, expected)
+    np.testing.assert_array_equal(X.data, original.data)
+    fields = ('row', 'col') if format == 'coo' else ('indices', 'indptr')
+    for field in fields:
+        actual_buffer, original_buffer = getattr(X, field), getattr(original, field)
+        assert actual_buffer.dtype == original_buffer.dtype
+        np.testing.assert_array_equal(actual_buffer, original_buffer)
+
+
+def test_shallow_copy_keeps_native_predictors(ensemble, compiled, examples):
+    X, expected = examples
+    expected = expected[:, :len(ensemble.base_score)]
+    for predictor in (TLPredictor(ensemble), compiled):
+        cloned = copy.copy(predictor)
+        cloned.postprocess_fn = sigmoid
+        np.testing.assert_allclose(cloned.predict(X), sigmoid(expected))
+        np.testing.assert_allclose(predictor.predict(X), expected)
+
+
+@pytest.mark.parametrize('batch_size', [0, 1])
+def test_sparse_batch_keeps_output_shape(ensemble, sparse_compiled, batch_size):
+    X = sparse.csr_matrix((np.zeros(2, dtype=np.float32), [0, 1], [0, 2]), shape=(1, 2))
+    actual = sparse_compiled.predict(X[:batch_size])
+    expected = np.array([[2, -4, 5.5]], dtype=np.float32)[:batch_size, :len(ensemble.base_score)]
+    assert actual.shape == expected.shape
+    np.testing.assert_allclose(actual, expected)
 
 
 @pytest.mark.parametrize('layout', ['float32', 'float64', 'fortran', 'strided', 'list'])

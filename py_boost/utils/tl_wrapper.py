@@ -1,9 +1,11 @@
 import os
 from collections import deque
+from copy import copy
 from itertools import count
 
 import joblib
 import numpy as np
+from scipy.sparse import csr_matrix, issparse
 from tqdm import tqdm
 
 from .tl2cgen_compat import tl2cgen, treelite
@@ -91,6 +93,29 @@ def _reshape_prediction(pred):
     return pred.reshape(pred.shape[0], pred.shape[1] * pred.shape[2])
 
 
+def _prepare_tl2cgen_input(X):
+    if not issparse(X):
+        return np.asarray(X, dtype=np.float32, order="C")
+    # The new sparse object may share buffers with X; replace rather than mutate
+    # those buffers. TL2cgen treats unstored entries as missing, but does not
+    # recognize NaNs stored explicitly in a CSR buffer. Drop only NaNs, not zeros.
+    matrix = csr_matrix(X, dtype=np.float32, copy=False)
+    missing = np.isnan(matrix.data)
+    if missing.any():
+        missing_rows = np.searchsorted(matrix.indptr, np.flatnonzero(missing), side='right') - 1
+        counts = np.bincount(missing_rows, minlength=matrix.shape[0])
+        indptr = np.array(matrix.indptr, dtype=np.uintp, copy=True)
+        indptr[1:] -= np.cumsum(counts, dtype=np.uintp)
+        matrix.indptr = indptr
+        matrix.data = matrix.data[~missing]
+        matrix.indices = matrix.indices[~missing]
+    # Match the C API dtypes before TL2cgen's NumPy 2 copy=False conversions.
+    matrix.data = np.ascontiguousarray(matrix.data)
+    matrix.indices = np.ascontiguousarray(matrix.indices, dtype=np.uintc)
+    matrix.indptr = np.ascontiguousarray(matrix.indptr, dtype=np.uintp)
+    return matrix
+
+
 class TLCompiledPredictor:
     """
     Compiled TL2cgen model for CPU inference
@@ -122,12 +147,12 @@ class TLCompiledPredictor:
         """Make prediction
 
         Args:
-            X: np.ndarray
+            X: np.ndarray or scipy sparse matrix; absent sparse entries are missing values
 
         Returns:
             np.ndarray
         """
-        X = np.asarray(X, dtype=np.float32, order="C")
+        X = _prepare_tl2cgen_input(X)
         pred = self.predictor.predict(tl2cgen.DMatrix(X))
         return self.postprocess_fn(_reshape_prediction(pred))
 
@@ -149,11 +174,6 @@ class TLCompiledPredictor:
         self.nthread = nthread
         self.predictor = tl2cgen.Predictor(self.libpath, nthread=nthread, verbose=self.verbose)
 
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        state["predictor"] = None
-        return state
-
     def dump(self, filename):
         """Dump instance
 
@@ -163,7 +183,9 @@ class TLCompiledPredictor:
         Returns:
 
         """
-        joblib.dump(self, filename)
+        metadata = copy(self)
+        metadata.predictor = None
+        joblib.dump(metadata, filename)
 
     @staticmethod
     def load(filename, libpath=None, nthread=None):
@@ -277,11 +299,6 @@ class TLPredictor:
         pred = treelite.gtil.predict(self.tl_model, X, nthread=nthread)
         return self.postprocess_fn(_reshape_prediction(pred))
 
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        state["tl_model"] = None
-        return state
-
     def dump(self, dirname, rewrite=False):
         """Dump treelite Model and predictor instance
 
@@ -294,7 +311,9 @@ class TLPredictor:
         """
         os.makedirs(dirname, exist_ok=rewrite)
         self.tl_model.serialize(os.path.join(dirname, 'model.mod'))
-        joblib.dump(self, os.path.join(dirname, 'predictor.pkl'))
+        metadata = copy(self)
+        metadata.tl_model = None
+        joblib.dump(metadata, os.path.join(dirname, 'predictor.pkl'))
 
     @staticmethod
     def load(dirname):

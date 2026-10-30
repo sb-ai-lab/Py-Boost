@@ -81,6 +81,8 @@ Predictions have shape `(n_samples, n_outputs)`, including single-output models.
 The underlying Treelite model stores raw scores as regression targets; the
 wrapper applies `model.postprocess_fn` once, after restoring this output shape.
 A custom CPU postprocessor can be supplied with `postprocess_fn=...`.
+Both predictor wrappers support shallow copying with `copy.copy()`; saving a
+predictor leaves the original and its copies usable.
 
 Compile the model with TL2cgen for faster CPU inference. Compilation requires a
 C compiler; prediction with the compiled library does not require a compiler:
@@ -95,6 +97,10 @@ prediction = compiled.predict(X_test)
 compiled.dump('compiled.pkl')
 restored_compiled = TLCompiledPredictor.load('compiled.pkl')
 ```
+
+`TLCompiledPredictor.predict()` also accepts SciPy sparse matrices (CSR, CSC
+and COO) without converting them to dense arrays. Unstored entries and stored
+NaNs are treated as missing values; explicitly stored zeros remain zero.
 
 Compiled predictor dumps contain metadata and the library path. Deploy the
 `.so`/`.dll` alongside the dump. If its path changes, load it with
