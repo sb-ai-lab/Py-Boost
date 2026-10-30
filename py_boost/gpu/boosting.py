@@ -1,5 +1,7 @@
 """Gradient boosting builder"""
 
+from numbers import Real
+
 try:
     import cupy as cp
 except Exception:
@@ -12,6 +14,22 @@ from ..callbacks.callback import EarlyStopping, EvalHistory, CallbackPipeline
 from ..multioutput.sketching import GradSketch
 from ..multioutput.target_splitter import SingleSplitter, OneVsAllSplitter
 from ..sampling.bagging import BaseSampler
+
+
+def _get_sampler(value, axis, name):
+    """Validate a sampling rate or preserve a custom sampler callback."""
+    if isinstance(value, Real) and not isinstance(value, bool):
+        if not 0 < value <= 1:
+            raise ValueError(f'{name} must be in (0, 1], got {value!r}')
+        # Keep axis-length arithmetic out of NumPy's low-precision scalar dtypes.
+        return BaseSampler(float(value), axis=axis)
+
+    hooks = ('before_train', 'before_iteration', 'after_iteration', 'after_train')
+    if callable(value) and all(callable(getattr(value, hook, None)) for hook in hooks):
+        return value
+
+    raise TypeError(f'{name} must be a real number in (0, 1] or a callable sampler '
+                    'implementing before_train, before_iteration, after_iteration and after_train')
 
 
 class GradientBoosting(Ensemble):
@@ -59,8 +77,8 @@ class GradientBoosting(Ensemble):
             max_depth: int > 0, maximum tree depth. Setting it to large values (>12) may cause OOM for wide datasets
             min_data_in_leaf: int, minimal leaf size. Note - for some loss fn leaf size is approximated
                 with hessian values to speed up training
-            colsample: float or Callable, sumsample of columns to construct trees or callable - custom sampling
-            subsample: float or Callable, sumsample of rows to construct trees or callable - custom sampling
+            colsample: real number in (0, 1] or sampler callback, fraction of columns to construct trees
+            subsample: real number in (0, 1] or sampler callback, fraction of rows to construct trees
             quant_sample: int, subsample to quantize features
             target_splitter: str or Callable, target splitter, defined multioutput strategy:
                 'Single', 'OneVsAll' or custom
@@ -76,7 +94,7 @@ class GradientBoosting(Ensemble):
 
             es: int, early stopping rounds. If 0, no early stopping
             seed: int, random state
-            verbose: int, verbosity freq
+            verbose: int, logging interval; <=0 disables progress logging
             callbacks: list of Callback, callbacks to customize training are passed here
 
             debug: bool, if debug mode is enabled (it removes ability to use deprecated functions,
@@ -132,13 +150,8 @@ class GradientBoosting(Ensemble):
         self.min_data_in_leaf = self.params['min_data_in_leaf']
         self.use_hess = self.params['use_hess']
 
-        self.colsample = self.params['colsample']
-        if type(self.params['colsample']) in [float, int]:
-            self.colsample = BaseSampler(self.params['colsample'], axis=1)
-
-        self.subsample = self.params['subsample']
-        if type(self.params['subsample']) in [float, int]:
-            self.subsample = BaseSampler(self.params['subsample'], axis=0)
+        self.colsample = _get_sampler(self.params['colsample'], axis=1, name='colsample')
+        self.subsample = _get_sampler(self.params['subsample'], axis=0, name='subsample')
 
         if self.params['target_splitter'] == 'Single':
             splitter = SingleSplitter()

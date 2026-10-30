@@ -52,8 +52,8 @@ class SketchBoost(GradientBoosting):
             max_depth: int > 0, maximum tree depth. Setting it to large values (>12) may cause OOM for wide datasets
             min_data_in_leaf: int, minimal leaf size. Note - for some loss fn leaf size is approximated
                 with hessian values to speed up training
-            colsample: float or Callable, sumsample of columns to construct trees or callable - custom sampling
-            subsample: float or Callable, sumsample of rows to construct trees or callable - custom sampling
+            colsample: real number in (0, 1] or sampler callback, fraction of columns to construct trees
+            subsample: real number in (0, 1] or sampler callback, fraction of rows to construct trees
 
             quantization: str or Quantizer, method for quantizatrion. One of 'Quantile', 'Uniform',
                 'Uniquant' or custom implementation
@@ -63,7 +63,7 @@ class SketchBoost(GradientBoosting):
 
             es: int, early stopping rounds. If 0, no early stopping
             seed: int, random state
-            verbose: int, verbosity freq
+            verbose: int, logging interval; <=0 disables progress logging
             sketch_outputs: int, number of outputs to keep
             sketch_method: str, name of the sketching strategy
             use_hess: bool, use hessians in multioutput training
