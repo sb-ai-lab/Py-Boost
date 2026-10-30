@@ -111,7 +111,8 @@ class MSLELoss(Loss):
         return (y_pred - y_true), cp.ones((y_true.shape[0], 1), dtype=cp.float32)
 
     def postprocess_output(self, y_pred):
-        return cp.expm1(y_pred)
+        xp = np if type(y_pred) is np.ndarray else cp
+        return xp.expm1(y_pred)
 
     def base_score(self, y_true):
         y_true = cp.log1p(y_true)

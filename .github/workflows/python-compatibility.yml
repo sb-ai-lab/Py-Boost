@@ -10,22 +10,50 @@ permissions:
 
 jobs:
   cpu:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.13", "3.14"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.8"
+            treelite: "treelite==4.1.2"
+          - os: ubuntu-latest
+            python-version: "3.12"
+            treelite: "treelite>=4.1.2,<5"
+          - os: ubuntu-latest
+            python-version: "3.12"
+            treelite: "treelite==4.1.2"
+          - os: ubuntu-latest
+            python-version: "3.13"
+            treelite: "treelite>=4.1.2,<5"
+          - os: ubuntu-latest
+            python-version: "3.14"
+            treelite: "treelite>=4.1.2,<5"
+          - os: windows-latest
+            python-version: "3.12"
+            treelite: "treelite>=4.1.2,<5"
+          - os: windows-latest
+            python-version: "3.14"
+            treelite: "treelite>=4.1.2,<5"
+    defaults:
+      run:
+        shell: bash
+    env:
+      OMP_NUM_THREADS: "2"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
       - name: Build distributions
         run: |
           python -m pip install --upgrade pip build
           python -m build
       - name: Install wheel and test dependencies
-        run: python -m pip install dist/*.whl pytest
+        run: python -m pip install dist/*.whl pytest '${{ matrix.treelite }}'
       - name: Run test suite
         working-directory: ${{ runner.temp }}
         run: python -m pytest -q -rs "$GITHUB_WORKSPACE/tests"
