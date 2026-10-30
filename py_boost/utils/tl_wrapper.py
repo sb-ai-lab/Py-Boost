@@ -1,192 +1,124 @@
 import os
+from collections import deque
+from copy import copy
+from itertools import count
 
 import joblib
+import numpy as np
+from scipy.sparse import csr_matrix, issparse
 from tqdm import tqdm
-import treelite
-import treelite_runtime as tl_run
+
+from .tl2cgen_compat import tl2cgen, treelite
+from treelite.model_builder import Metadata, ModelBuilder, PostProcessorFunc, TreeAnnotation
 
 
-def _create_node_deprecated(tree, node_id):
-    """(DEPRECATED) Create a node of treelite tree
-    Args:
-        tree: Py-Boost Tree, tree to parse
-        node_id: int, node index
-    Returns:
-        dict, args of treelite.ModelBuilder.Tree .set_numerical_test_node or .set_leaf_node
-    """
-    feature_id = tree.feats[0][node_id]
+def parse_pb_tree(tree, builder):
+    """Append a single-group Py-Boost tree to a Treelite 4 model builder."""
+    if tree.ngroups != 1:
+        raise ValueError("Treelite conversion requires target_splitter='Single'")
 
-    if feature_id >= 0:
-        left, right = tuple(tree.split[0][node_id])
-        node = {
-
-            'feature_id': feature_id,
-            'opname': '<=',
-            'threshold': tree.val_splits[0][node_id],
-            'default_left': tree.nans[0][node_id],
-            'left_child_key': left,
-            'right_child_key': right,
-        }
-
-        return node, left, right
-
-    return {'value': tree.values[tree.leaves[node_id][0]]}, None, None
-
-
-def create_node(tree, node_id, id_gen):
-    """Create a node of treelite tree
-
-    Args:
-        tree: Py-Boost Tree, tree to parse
-        node_id: int, node index in original format tree
-        id_gen: generator, new id generator
-
-    Returns:
-        dict, args of treelite.ModelBuilder.Tree .set_numerical_test_node
-    """
-
-    assert node_id >= 0
-
-    feature_id = int(tree.test_format[node_id * 4])
-    nan_left = feature_id < 0
-    feature_id = abs(feature_id) - 1
-
-    left = int(tree.test_format[node_id * 4 + 2])
-    right = int(tree.test_format[node_id * 4 + 3])
-    new_id_left = next(id_gen)
-    new_id_right = next(id_gen)
-    node = {
-        'feature_id': feature_id,
-        'opname': '<=',
-        'threshold': tree.test_format[node_id * 4 + 1],
-        'default_left': nan_left,
-        'left_child_key': new_id_left,
-        'right_child_key': new_id_right,
-    }
-
-    return node, (left, new_id_left), (right, new_id_right)
-
-
-def parse_pb_tree(tree):
-    """Parse s single Py-Boost Tree to treelite.ModelBuilder.Tree format
-
-    Args:
-        tree: Py-Boost tree
-
-    Returns:
-        treelite.ModelBuilder.Tree
-    """
-    assert tree.ngroups == 1, 'Models with more than 1 group are not currently supported'
-
-    def id_generator():
-        id_num = 1
-        while True:
-            yield id_num
-            id_num += 1
-    id_gen = id_generator()
-
-    tl_tree = treelite.ModelBuilder.Tree()
-    curr_nodes = [(0, 0)]  # (old_id, new_id)
-
-    while len(curr_nodes) > 0:
-        old_id, new_id = curr_nodes.pop(0)
-        curr_node, left, right = create_node(tree, old_id, id_gen)
-        tl_tree[new_id].set_numerical_test_node(**curr_node)
-
-        if left[0] >= 0:
-            curr_nodes.append(left)
+    # Py-Boost uses negative child indices for leaves. Assign fresh, nonnegative
+    # Treelite keys to both split and leaf nodes, including repeated leaf indices.
+    node_ids = count(1)
+    nodes = deque([(0, 0)])
+    builder.start_tree()
+    while nodes:
+        old_id, new_id = nodes.popleft()
+        builder.start_node(new_id)
+        if old_id < 0:
+            values = np.asarray(tree.values[-old_id - 1]).reshape(-1).tolist()
+            builder.leaf(values[0] if len(values) == 1 else values)
         else:
-            tl_tree[left[1]].set_leaf_node(tree.values[abs(left[0]) - 1])
-        if right[0] >= 0:
-            curr_nodes.append(right)
-        else:
-            tl_tree[right[1]].set_leaf_node(tree.values[abs(right[0]) - 1])
-
-    tl_tree[0].set_root()
-    return tl_tree
-
-
-def _parse_pb_tree_deprecated(tree):
-    """Parse s single Py-Boost Tree to treelite.ModelBuilder.Tree format
-
-    Args:
-        tree: Py-Boost tree
-
-    Returns:
-        treelite.ModelBuilder.Tree
-    """
-    assert tree.ngroups == 1, 'Models with more than 1 group are not currently supported'
-
-    tl_tree = treelite.ModelBuilder.Tree()
-    curr_nodes = [0]
-
-    while len(curr_nodes) > 0:
-
-        next_nodes = []
-
-        for node_id in curr_nodes:
-
-            curr_node, left, right = _create_node_deprecated(tree, node_id)
-            # add node
-            tl_tree[node_id]
-            if left is not None:
-                tl_tree[node_id].set_numerical_test_node(**curr_node)
-                next_nodes.extend([left, right])
-            else:
-                tl_tree[node_id].set_leaf_node(curr_node['value'])
-
-        curr_nodes = next_nodes
-
-    tl_tree[0].set_root()
-
-    return tl_tree
+            feature, threshold, left, right = tree.test_format[old_id * 4:old_id * 4 + 4]
+            left_id, right_id = next(node_ids), next(node_ids)
+            builder.numerical_test(
+                feature_id=abs(int(feature)) - 1,
+                threshold=float(threshold),
+                default_left=bool(feature < 0),
+                opname='<=',
+                left_child_key=left_id,
+                right_child_key=right_id,
+            )
+            nodes.extend([(int(left), left_id), (int(right), right_id)])
+        builder.end_node()
+    builder.end_tree()
 
 
 def convert_pb_to_treelite(model):
-    """Convert Py-Boost Ensemble instance to the treelite.ModelBuilder.Tree
+    """Return a Treelite 4 builder containing the ensemble's raw scores.
 
-    Args:
-        model: Py-Boost Tree
-
-    Returns:
-        treelite.ModelBuilder.Tree
+    All outputs are represented as regression targets. The original Py-Boost
+    postprocess_fn handles the loss-specific transform, including classification,
+    so custom losses and postprocessors retain their existing behavior.
     """
-    nfeats = model.nfeats
-    ngroups = model.models[0].values.shape[1]
-
-    builder = treelite.ModelBuilder(
-        num_feature=nfeats,
-        num_class=ngroups,
-        pred_transform='identity_multiclass' if ngroups > 1 else 'identity'
+    if not model.models:
+        raise ValueError('Cannot convert an ensemble without trees')
+    nout = model.models[0].values.shape[1]
+    num_tree = len(model.models) + 1
+    builder = ModelBuilder(
+        threshold_type='float32',
+        leaf_output_type='float32',
+        metadata=Metadata(
+            num_feature=int(model.nfeats),
+            task_type='kRegressor',
+            average_tree_output=False,
+            num_target=nout,
+            num_class=[1] * nout,
+            leaf_vector_shape=(nout, 1),
+        ),
+        tree_annotation=TreeAnnotation(
+            num_tree=num_tree,
+            target_id=[-1 if nout > 1 else 0] * num_tree,
+            class_id=[0] * num_tree,
+        ),
+        postprocessor=PostProcessorFunc(name='identity'),
+        base_scores=[0.0] * nout,
     )
-
+    # TL2cgen 1.0 applies base_scores[0] to every regression target. Store the
+    # vector intercept as a constant tree instead, before the boosting trees,
+    # matching Py-Boost's accumulation order in both GTIL and compiled inference.
+    bias = np.asarray(model.base_score).reshape(-1).tolist()
+    builder.start_tree()
+    builder.start_node(0)
+    builder.leaf(bias[0] if nout == 1 else bias)
+    builder.end_node()
+    builder.end_tree()
     for tree in tqdm(model.models):
-        builder.append(parse_pb_tree(tree))
-
-    # add bias tree
-    bias_tree = treelite.ModelBuilder.Tree()
-    bias_tree[0].set_numerical_test_node(**{
-
-        'feature_id': 0,
-        'opname': '<',
-        'threshold': 0,
-        'default_left': True,
-        'left_child_key': 1,
-        'right_child_key': 2
-    })
-
-    for i in range(1, 3):
-        bias_tree[i].set_leaf_node(model.base_score)
-
-    bias_tree[0].set_root()
-    builder.append(bias_tree)
-
+        parse_pb_tree(tree, builder)
     return builder
+
+
+def _reshape_prediction(pred):
+    """Restore Py-Boost's (n_samples, n_outputs) contract, including empty batches."""
+    return pred.reshape(pred.shape[0], pred.shape[1] * pred.shape[2])
+
+
+def _prepare_tl2cgen_input(X):
+    if not issparse(X):
+        return np.asarray(X, dtype=np.float32, order="C")
+    # The new sparse object may share buffers with X; replace rather than mutate
+    # those buffers. TL2cgen treats unstored entries as missing, but does not
+    # recognize NaNs stored explicitly in a CSR buffer. Drop only NaNs, not zeros.
+    matrix = csr_matrix(X, dtype=np.float32, copy=False)
+    missing = np.isnan(matrix.data)
+    if missing.any():
+        missing_rows = np.searchsorted(matrix.indptr, np.flatnonzero(missing), side='right') - 1
+        counts = np.bincount(missing_rows, minlength=matrix.shape[0])
+        indptr = np.array(matrix.indptr, dtype=np.uintp, copy=True)
+        indptr[1:] -= np.cumsum(counts, dtype=np.uintp)
+        matrix.indptr = indptr
+        matrix.data = matrix.data[~missing]
+        matrix.indices = matrix.indices[~missing]
+    # Match the C API dtypes before TL2cgen's NumPy 2 copy=False conversions.
+    matrix.data = np.ascontiguousarray(matrix.data)
+    matrix.indices = np.ascontiguousarray(matrix.indices, dtype=np.uintc)
+    matrix.indptr = np.ascontiguousarray(matrix.indptr, dtype=np.uintp)
+    return matrix
 
 
 class TLCompiledPredictor:
     """
-    Compiled treelite model saved to predict
+    Compiled TL2cgen model for CPU inference
     """
 
     @staticmethod
@@ -215,13 +147,14 @@ class TLCompiledPredictor:
         """Make prediction
 
         Args:
-            X: np.ndarray
+            X: np.ndarray or scipy sparse matrix; absent sparse entries are missing values
 
         Returns:
             np.ndarray
         """
-        pred = self.predictor.predict(tl_run.DMatrix(X))
-        return self.postprocess_fn(pred)
+        X = _prepare_tl2cgen_input(X)
+        pred = self.predictor.predict(tl2cgen.DMatrix(X))
+        return self.postprocess_fn(_reshape_prediction(pred))
 
     def set_libpath(self, libpath=None, nthread=None):
         """Update library path
@@ -238,7 +171,8 @@ class TLCompiledPredictor:
         if nthread is None:
             nthread = self.nthread
         self.libpath = os.path.abspath(libpath)
-        self.predictor = tl_run.Predictor(self.libpath, nthread=nthread, verbose=self.verbose)
+        self.nthread = nthread
+        self.predictor = tl2cgen.Predictor(self.libpath, nthread=nthread, verbose=self.verbose)
 
     def dump(self, filename):
         """Dump instance
@@ -249,21 +183,24 @@ class TLCompiledPredictor:
         Returns:
 
         """
-        self.predictor = None
-        joblib.dump(self, filename)
+        metadata = copy(self)
+        metadata.predictor = None
+        joblib.dump(metadata, filename)
 
     @staticmethod
-    def load(filename):
+    def load(filename, libpath=None, nthread=None):
         """Load instance
 
         Args:
             filename: str, filename
+            libpath: str or None, override the saved compiled library path
+            nthread: int or None, override the saved number of worker threads
 
         Returns:
             TLCompiledPredictor
         """
         predictor = joblib.load(filename)
-        predictor.set_libpath()
+        predictor.set_libpath(libpath=libpath, nthread=nthread)
 
         return predictor
 
@@ -310,14 +247,15 @@ class TLPredictor:
             options=None,
             predictor_params=None
     ):
-        """Compile model for faster inference. For the details please see
-        https://treelite.readthedocs.io/en/latest/tutorials/first.html
+        """Compile a CPU inference library with TL2cgen.
+
+        See https://tl2cgen.readthedocs.io/en/latest/api.html#tl2cgen.export_lib
 
         Args:
             toolchain:
             libpath:
             params:
-            compiler:
+            compiler: retained for compatibility; only 'ast_native' is supported
             verbose:
             nthread:
             options:
@@ -327,11 +265,15 @@ class TLPredictor:
 
         """
 
+        if compiler != 'ast_native':
+            raise ValueError("TL2cgen only supports compiler='ast_native'")
         params = {} if params is None else params
-        params = {**{'parallel_comp': os.cpu_count(), }, **params}
+        params = {**{'parallel_comp': os.cpu_count() or 1}, **params}
 
-        self.tl_model.export_lib(toolchain, libpath,
-                                 params, compiler, verbose, nthread, options)
+        tl2cgen.export_lib(
+            self.tl_model, toolchain=toolchain, libpath=libpath, params=params,
+            verbose=verbose, nthread=nthread, options=options,
+        )
 
         if predictor_params is None:
             predictor_params = {}
@@ -351,9 +293,11 @@ class TLPredictor:
             np.ndarray
         """
         if nthread is None:
-            nthread = os.cpu_count()
+            # Let Treelite respect OpenMP's thread limit (for example in CI).
+            nthread = -1
+        X = np.asarray(X, dtype=np.float32, order="C")
         pred = treelite.gtil.predict(self.tl_model, X, nthread=nthread)
-        return self.postprocess_fn(pred)
+        return self.postprocess_fn(_reshape_prediction(pred))
 
     def dump(self, dirname, rewrite=False):
         """Dump treelite Model and predictor instance
@@ -366,11 +310,10 @@ class TLPredictor:
 
         """
         os.makedirs(dirname, exist_ok=rewrite)
-        temp = self.tl_model
-        self.tl_model = None
-        temp.serialize(os.path.join(dirname, 'model.mod'))
-        joblib.dump(self, os.path.join(dirname, 'predictor.pkl'))
-        self.tl_model = temp
+        self.tl_model.serialize(os.path.join(dirname, 'model.mod'))
+        metadata = copy(self)
+        metadata.tl_model = None
+        joblib.dump(metadata, os.path.join(dirname, 'predictor.pkl'))
 
     @staticmethod
     def load(dirname):

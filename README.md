@@ -57,6 +57,63 @@ with CUDA 12.x:
 For other Python or CUDA versions, choose the appropriate CuPy package from the
 [CuPy installation guide](https://docs.cupy.dev/en/stable/install.html).
 
+## CPU inference with Treelite and TL2cgen
+
+Py-Boost uses Treelite 4 (`>=4.1.2,<5`) and TL2cgen 1 (`>=1,<2`) for CPU
+inference. Both dependencies are installed with Py-Boost; `treelite_runtime`
+is no longer used. NumPy 1.x and 2.x are supported, subject to your Python
+version and the other dependencies.
+
+Convert a fitted model trained with `target_splitter='Single'` (the default):
+
+```python
+from py_boost import TLPredictor, TLCompiledPredictor
+
+tl_model = TLPredictor(model)
+prediction = tl_model.predict(X_test, nthread=4)
+tl_model.dump('cpu_model')
+restored = TLPredictor.load('cpu_model')
+```
+
+Single-output and multi-output regression, binary/multilabel classification,
+and multiclass classification keep the original model's postprocessing.
+Predictions have shape `(n_samples, n_outputs)`, including single-output models.
+The underlying Treelite model stores raw scores as regression targets; the
+wrapper applies `model.postprocess_fn` once, after restoring this output shape.
+A custom CPU postprocessor can be supplied with `postprocess_fn=...`.
+Both predictor wrappers support shallow copying with `copy.copy()`; saving a
+predictor leaves the original and its copies usable.
+
+Compile the model with TL2cgen for faster CPU inference. Compilation requires a
+C compiler; prediction with the compiled library does not require a compiler:
+
+```python
+# Linux: GCC must be installed and on PATH.
+compiled = tl_model.compile('gcc', 'model.so', nthread=4)
+# Windows: run from a Visual Studio developer shell, with MSVC on PATH.
+# compiled = tl_model.compile('msvc', 'model.dll', nthread=4)
+
+prediction = compiled.predict(X_test)
+compiled.dump('compiled.pkl')
+restored_compiled = TLCompiledPredictor.load('compiled.pkl')
+```
+
+`TLCompiledPredictor.predict()` also accepts SciPy sparse matrices (CSR, CSC
+and COO) without converting them to dense arrays. Unstored entries and stored
+NaNs are treated as missing values; explicitly stored zeros remain zero.
+
+Compiled predictor dumps contain metadata and the library path. Deploy the
+`.so`/`.dll` alongside the dump. If its path changes, load it with
+`TLCompiledPredictor.load('compiled.pkl', libpath=new_path)`. Use
+`set_libpath(new_path)` to relocate an already loaded predictor.
+Use a library built for the target operating system and architecture. The
+legacy `compiler` argument accepts only its default value, `'ast_native'`.
+See the [TL2cgen migration guide](https://tl2cgen.readthedocs.io/en/latest/treelite-migration.html)
+for the underlying API changes.
+
+Treelite 3 model checkpoints and libraries compiled with `treelite_runtime`
+should be re-exported from the original Py-Boost model with this version.
+
 ## Quick tour
 
 Py-boost is easy to use since it has an interface similar to scikit-learn's. For usage examples, please see:
