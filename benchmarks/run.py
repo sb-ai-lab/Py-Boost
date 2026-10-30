@@ -147,60 +147,74 @@ def worker(job):
         del warm
     gc.collect()
     cp.get_default_memory_pool().free_all_blocks()
-    fit_times, predict_times, measurements = [], [], []
-    repeats = job['repeats'] if job['phase'] == 'timing' else 1
-    for _ in range(repeats):
-        model, counter = new_model()
-        if job['phase'] == 'timing':
-            sync()
-            start = time.perf_counter()
-            model.fit(X, y, eval_sets=valid)
-            sync()
-            fit_times.append(time.perf_counter() - start)
-            start = time.perf_counter()
-            prediction = model.predict(test_X)
-            sync()
-            predict_times.append(time.perf_counter() - start)
+    def measure(phase):
+        fit_times, predict_times, measurements = [], [], []
+        repeats = job['repeats'] if phase == 'timing' else 1
+        for _ in range(repeats):
+            model, counter = new_model()
+            if phase == 'timing':
+                sync()
+                start = time.perf_counter()
+                model.fit(X, y, eval_sets=valid)
+                sync()
+                fit_times.append(time.perf_counter() - start)
+                start = time.perf_counter()
+                prediction = model.predict(test_X)
+                sync()
+                predict_times.append(time.perf_counter() - start)
+            else:
+                with memory_tracker(cp) as tracker:
+                    with RssPeak(psutil.Process()) as rss_fit:
+                        model.fit(X, y, eval_sets=valid)
+                        sync()
+                    fit_peak = tracker.peak
+                    tracker.reset_peak()
+                    with RssPeak(psutil.Process()) as rss_predict:
+                        prediction = model.predict(test_X)
+                        sync()
+                    memory = {'fit_cupy_peak_bytes': fit_peak,
+                              'predict_cupy_peak_bytes': tracker.peak,
+                              'fit_rss_peak_bytes': rss_fit.peak,
+                              'predict_rss_peak_bytes': rss_predict.peak,
+                              'fit_rss_baseline_bytes': rss_fit.baseline}
+            if counter.count != params['ntrees']:
+                raise RuntimeError(f'Expected {params["ntrees"]} iterations, got {counter.count}')
+            if prediction.shape != (case['test'], case['outputs']):
+                raise RuntimeError(f'Unexpected prediction shape: {prediction.shape}')
+            score = quality(case['task'], test_y, prediction)
+            if not np.isfinite(score['value']):
+                raise RuntimeError('Non-finite holdout metric')
+            measurements.append({'trained_iterations': counter.count,
+                                 'retained_trees': len(model.models), 'quality': score})
+            cleanup(model)
+            del model, prediction
+        result = {'status': 'ok', 'environment': metadata, 'data_hash': data_hash,
+                  'params': params, 'measurements': measurements,
+                  'quality': dict(name=score['name'], **summarize([m['quality']['value'] for m in measurements])),
+                  'imported_library': py_boost.__file__}
+        if phase == 'timing':
+            result.update(fit_seconds=summarize(fit_times), predict_seconds=summarize(predict_times))
         else:
-            with memory_tracker(cp) as tracker:
-                with RssPeak(psutil.Process()) as rss_fit:
-                    model.fit(X, y, eval_sets=valid)
-                    sync()
-                fit_peak = tracker.peak
-                tracker.reset_peak()
-                with RssPeak(psutil.Process()) as rss_predict:
-                    prediction = model.predict(test_X)
-                    sync()
-                memory = {'fit_cupy_peak_bytes': fit_peak,
-                          'predict_cupy_peak_bytes': tracker.peak,
-                          'fit_rss_peak_bytes': rss_fit.peak,
-                          'predict_rss_peak_bytes': rss_predict.peak,
-                          'fit_rss_baseline_bytes': rss_fit.baseline}
-        if counter.count != params['ntrees']:
-            raise RuntimeError(f'Expected {params["ntrees"]} iterations, got {counter.count}')
-        if prediction.shape != (case['test'], case['outputs']):
-            raise RuntimeError(f'Unexpected prediction shape: {prediction.shape}')
-        score = quality(case['task'], test_y, prediction)
-        if not np.isfinite(score['value']):
-            raise RuntimeError('Non-finite holdout metric')
-        measurements.append({'trained_iterations': counter.count,
-                             'retained_trees': len(model.models), 'quality': score})
-        cleanup(model)
-        del model, prediction
-    result = {'status': 'ok', 'environment': metadata, 'data_hash': data_hash,
-              'params': params, 'measurements': measurements,
-              'quality': dict(name=score['name'], **summarize([m['quality']['value'] for m in measurements])),
-              'imported_library': py_boost.__file__}
-    if job['phase'] == 'timing':
-        result.update(fit_seconds=summarize(fit_times), predict_seconds=summarize(predict_times))
-    else:
-        result.update(memory)
-    return result
+            result.update(memory)
+        return result
 
+
+    result = {'status': 'running', 'environment': metadata, 'data_hash': data_hash}
+    for phase in ['timing', 'memory']:
+        try:
+            result[phase] = measure(phase)
+        except Exception:
+            result[phase] = {'status': 'error', 'error': traceback.format_exc()}
+            result['status'] = 'error'
+            return result
+        write_json(job['result_path'], result)
+    result['status'] = 'ok'
+    return result
 
 def invoke(python, output, job, timeout):
     output = Path(output)
     request, result, log = output.with_suffix('.job.json'), output.with_suffix('.json'), output.with_suffix('.log')
+    job['result_path'] = str(result)
     write_json(request, job)
     env = dict(os.environ)
     env['CUDA_VISIBLE_DEVICES'] = job['device']
@@ -221,7 +235,8 @@ def invoke(python, output, job, timeout):
         if process.returncode and record.get('status') == 'ok':
             record = {'status': 'error', 'error': f'Worker exited {process.returncode}'}
     except subprocess.TimeoutExpired:
-        record = {'status': 'error', 'error': f'Timeout after {timeout} seconds'}
+        record = json.loads(result.read_text()) if result.exists() else {}
+        record.update(status='error', error=f'Timeout after {timeout} seconds')
     record['log'] = str(log)
     return record
 
@@ -265,28 +280,19 @@ def run(args):
         directories.append(directory)
         write_json(directory / 'results.json', report)
     for index, case in enumerate(cases):
-        # Alternate version order for each case; each case/phase gets a fresh process.
+        # One fresh process per version/case; timing and memory are separate phases.
         order = list(range(len(sources)))
         if index % 2:
             order.reverse()
-        for phase in ['timing', 'memory']:
-            for i in order:
-                print(f'{sources[i]["commit"][:12]} {case["id"]} {phase}', flush=True)
-                job = dict(source=sources[i], phase=phase, device=args.device, suite=suite,
-                           case=case, repeats=args.repeats)
-                record = invoke(args.python, directories[i] / 'raw' / f'{case["id"]}-{phase}', job, args.timeout)
-                entry = reports[i]['cases'].setdefault(case['id'], {'spec': case, 'status': 'running'})
-                entry[phase] = record
-                if record['status'] == 'ok' and record['environment'] != reports[i]['environment']:
-                    record.update(status='error', error='Environment changed during the run')
-                if phase == 'memory':
-                    a, b = entry['timing'], entry['memory']
-                    entry['status'] = 'ok' if a['status'] == b['status'] == 'ok' else 'error'
-                    if entry['status'] == 'ok':
-                        entry['data_hash'] = a['data_hash']
-                        if a['data_hash'] != b['data_hash']:
-                            entry.update(status='error', error='Dataset changed between measurement phases')
-                write_json(directories[i] / 'results.json', reports[i])
+        for i in order:
+            print(f'{sources[i]["commit"][:12]} {case["id"]}', flush=True)
+            job = dict(source=sources[i], phase='case', device=args.device, suite=suite,
+                       case=case, repeats=args.repeats)
+            record = invoke(args.python, directories[i] / 'raw' / case['id'], job, args.timeout)
+            if record['status'] == 'ok' and record['environment'] != reports[i]['environment']:
+                record.update(status='error', error='Environment changed during the run')
+            reports[i]['cases'][case['id']] = dict(spec=case, **record)
+            write_json(directories[i] / 'results.json', reports[i])
     for report, directory in zip(reports, directories):
         report['complete'] = all(c['status'] == 'ok' for c in report['cases'].values())
         report['finished_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -352,7 +358,7 @@ def main():
         try:
             result = worker(json.loads(Path(args.job).read_text()))
             write_json(args.result, result)
-            return 0
+            return 0 if result['status'] == 'ok' else 1
         except Exception:
             write_json(args.result, {'status': 'error', 'error': traceback.format_exc()})
             traceback.print_exc()

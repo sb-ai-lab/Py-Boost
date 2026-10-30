@@ -82,13 +82,13 @@ sources may be measured in one run; compare any two results afterward:
 `--python /path/to/environment/bin/python` selects the worker interpreter.
 `--case mse-single --repeats 1` is a diagnostic subset, not the mandatory full
 profile. Output directories must be empty so previous evidence is not overwritten.
-Workers have a 900-second timeout including setup/warmup; failures and OOM retain
+Workers have a 900-second timeout including setup/warmup and both phases; failures and OOM retain
 logs/results, and the command exits nonzero. A version lacking a required API is
 reported as failed, not silently replaced by another implementation.
 
 ## Measurement contract
 
-- Each case/measurement phase/version uses a fresh subprocess. When multiple
+- Each case/version uses a fresh subprocess. When multiple
   versions are measured, their order alternates by case.
 - Each subprocess generates and hashes data, then warms one complete fit/predict.
   Data generation, imports, JIT warmup and estimator construction are excluded
@@ -97,7 +97,9 @@ reported as failed, not silently replaced by another implementation.
 - Timing uses five fresh-model repetitions, `perf_counter` and device-wide CUDA
   synchronization. Raw samples, median and p10/p90 are retained. These are warmed
   timings, not cold-start latency. Holdout scoring is outside the timers.
-- Memory uses a separate run so hooks/RSS sampling do not contaminate timings.
+- After the timing repetitions, memory uses a separate fresh-model fit/predict in
+  the same subprocess. Hooks/RSS sampling are disabled during timing. Keeping
+  both phases in one process avoids repeating Numba import-time compilation.
   CuPy malloc/free hooks track **peak live rounded allocation bytes**, including
   Py-Boost's private fit pool. This excludes free pool cache, CUDA context and
   allocations outside CuPy's hooked pools; it is not total process VRAM.
@@ -114,7 +116,7 @@ reported as failed, not silently replaced by another implementation.
 
 Reports identify the exact library commit and library-source checksum, benchmark
 implementation checksum, manifest checksum, actual dataset checksum, GPU UUID,
-CPU/OS, Python, relevant dependency versions, CUDA driver/runtime, repetitions and
+  CPU/OS, Python, relevant dependency versions, CUDA driver/runtime, repetitions and
 warmups. `compare` refuses mismatched workloads, datasets, environments or failed
 measurements (exit code 2). Partial runs are marked `full_suite: false`; only a full
 five-repeat run satisfies the PR requirement. Comparison tables show measured
