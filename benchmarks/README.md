@@ -73,6 +73,17 @@ git worktree add --detach ../Py-Boost-v0.5.2 v0.5.2
   --device 1 --output .benchmark-results/v052-vs-current
 ```
 
+For the same 12 workloads with `sketch_outputs=5`, select the separate frozen
+`pyboost-gpu-v1-k5` profile. The k=8 manifest remains unchanged; reports with
+different sketch widths are not comparable:
+
+```bash
+.venv-benchmark/bin/python benchmarks/run.py run \
+  --suite benchmarks/suite-v1-k5.json \
+  --source /path/to/baseline --source /path/to/candidate \
+  --device 1 --output .benchmark-results/k5-comparison
+```
+
 Commit changes to `py_boost/` or `pyproject.toml` first: dirty library sources are
 rejected. **Exactly one physical GPU is used for the entire run.** Use a physical
 GPU index or UUID (`nvidia-smi -L`). `--device 1` selects only physical GPU #1; it

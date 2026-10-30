@@ -263,7 +263,7 @@ def invoke(python, output, job, timeout):
 
 
 def run(args):
-    suite = load_suite()
+    suite = load_suite(args.suite)
     sources = [source_info(p) for p in args.source]
     if len({s['commit'] for s in sources}) != len(sources):
         raise ValueError('Each source must have a different commit')
@@ -285,7 +285,7 @@ def run(args):
         directory = output / source['commit'][:12]
         (directory / 'raw').mkdir(parents=True)
         report = {'schema_version': SCHEMA_VERSION, 'benchmark_id': suite['benchmark_id'],
-                  'implementation_hash': implementation_hash(), 'suite_hash': digest_json(suite),
+                  'implementation_hash': implementation_hash(suite), 'suite_hash': digest_json(suite),
                   'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                   'source': source, 'case_ids': [c['id'] for c in cases],
                   'full_suite': len(cases) == len(suite['cases']),
@@ -379,6 +379,8 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     command = commands.add_parser('run', help='Run one or more clean source checkouts')
     command.add_argument('--source', action='append', required=True, help='Git checkout; repeat to compare versions')
+    command.add_argument('--suite', type=Path, default=ROOT / 'suite-v1.json',
+                         help='Frozen suite manifest (default: suite-v1.json, k=8)')
     command.add_argument('--output', required=True)
     command.add_argument('--device', required=True, help='One physical GPU index or UUID')
     command.add_argument('--python', default=sys.executable, help='Interpreter containing the pinned dependencies')

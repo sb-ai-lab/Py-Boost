@@ -17,7 +17,7 @@ sys.modules[_spec.name] = _package
 _spec.loader.exec_module(_package)
 
 from pyboost_benchmark_suite.gpu import memory_tracker
-from pyboost_benchmark_suite.protocol import comparison_errors, load_suite, make_data, quality
+from pyboost_benchmark_suite.protocol import ROOT, comparison_errors, implementation_hash, load_suite, make_data, quality
 from pyboost_benchmark_suite.run import environment, render_comparison
 from pyboost_benchmark_suite import run as runner
 
@@ -53,6 +53,26 @@ def test_same_multilabel_data_for_different_sketch_methods():
     for case in [rand, filt]:
         case.update(train=64, valid=16, test=16, outputs=8)
     assert make_data(rand, suite['data_seed'])[-1] == make_data(filt, suite['data_seed'])[-1]
+
+
+def test_k5_profile_changes_only_sketch_width_and_identity():
+    from copy import deepcopy
+    original = load_suite()
+    k5 = load_suite(ROOT / 'suite-v1-k5.json')
+    assert k5['benchmark_id'] == 'pyboost-gpu-v1-k5'
+    expected = deepcopy(original)
+    expected['benchmark_id'] = k5['benchmark_id']
+    for case in expected['cases']:
+        if case['model'] == 'SketchBoost':
+            case['params']['sketch_outputs'] = 5
+    assert k5 == expected
+    assert implementation_hash(k5) != implementation_hash(original)
+    assert all(c['params']['sketch_outputs'] == 8 for c in original['cases']
+               if c['model'] == 'SketchBoost')
+    before, after = small_case(), small_case()
+    before['params'] = dict(sketch_outputs=8)
+    after['params'] = dict(sketch_outputs=5)
+    assert make_data(before, 42)[-1] == make_data(after, 42)[-1]
 
 
 def test_holdout_metrics_and_invalid_predictions():
@@ -157,7 +177,7 @@ def test_cli_rejects_multiple_gpu_ids_before_starting_workers(monkeypatch, tmp_p
     monkeypatch.setattr(runner, 'source_info', lambda path: dict(commit='abc', path=str(path)))
     monkeypatch.setattr(runner, 'invoke', lambda *args: pytest.fail('Worker must not start'))
     output = tmp_path / 'results'
-    args = SimpleNamespace(source=['checkout'], case=None, repeats=5, timeout=900,
+    args = SimpleNamespace(source=['checkout'], suite=None, case=None, repeats=5, timeout=900,
                            device='0,1', output=str(output))
     with pytest.raises(ValueError, match='exactly one GPU'):
         runner.run(args)

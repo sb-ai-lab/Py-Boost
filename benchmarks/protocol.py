@@ -14,16 +14,17 @@ def digest_json(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def implementation_hash():
+def implementation_hash(suite=None):
     digest = hashlib.sha256()
-    for name in ['suite-v1.json', 'protocol.py', 'gpu.py', 'run.py']:
+    digest.update(digest_json(load_suite() if suite is None else suite).encode())
+    for name in ['protocol.py', 'gpu.py', 'run.py']:
         digest.update(name.encode())
         digest.update((ROOT / name).read_bytes())
     return digest.hexdigest()
 
 
-def load_suite():
-    return json.loads((ROOT / 'suite-v1.json').read_text())
+def load_suite(path=None):
+    return json.loads((Path(path) if path is not None else ROOT / 'suite-v1.json').read_text())
 
 
 def make_data(case, seed):
