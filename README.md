@@ -73,3 +73,103 @@ Py-boost is easy to use since it has an interface similar to scikit-learn's. For
   examples of parsing and inference on CPU with ONNX
 
 More examples are coming soon.
+
+## Missing binary targets
+
+For binary or multilabel targets, use `NaN` for unknown labels and `0` for
+observed negatives. `BCEWithNaNLoss` excludes missing labels from gradients
+and Hessians. Its initial probabilities are weighted frequencies over observed
+labels; zero-weight rows do not affect them. Every training target column must
+contain an observed label with positive row weight. Without `sample_weight`,
+each row has weight 1. Both all-NaN columns and columns whose observed labels
+all have zero weight raise `ValueError` listing their zero-based indices before
+initialization or tree construction. This check applies to the training
+partition of each cross-validation fold; no columns are silently removed.
+Entirely unobserved columns are allowed in evaluation sets.
+Keep `lambda_l2 > 0` so leaves without observed labels have finite updates.
+
+```python
+from py_boost import GradientBoosting
+from py_boost.gpu.losses import BCEWithNaNLoss, NaNAucMetric
+
+model = GradientBoosting(BCEWithNaNLoss(), metric=NaNAucMetric(), lambda_l2=1)
+model.fit(X_train, y_train, eval_sets=[{"X": X_valid, "y": y_valid}])
+```
+
+The loss also accepts aliases `bce_nan` and `multilabel_nan`. Its default
+metric is `NaNBCEMetric`; metric names `bce`/`logloss` and `auc`/`roc` select
+the corresponding NaN-aware metrics when used with this loss. Explicit metric
+aliases `bce_nan`, `auc_nan` and `gini_nan` are also available. Existing losses
+and their default metrics are unchanged.
+
+Import these metrics from `py_boost.gpu.losses`:
+
+| Metric | Result |
+| --- | --- |
+| `NaNBCEMetric` | Mean BCE over observed labels; `return_list=True` gives per-output losses as a CuPy array. |
+| `BCEWithNaNMetricWeighted(output_weights)` | Weighted mean of per-output BCE. |
+| `NaNAucMetric` | Macro ROC AUC; `return_list=True` gives a NumPy array. |
+| `NaNAucMetricByClass` | Per-output ROC AUC as a NumPy array, for reporting. |
+| `NaNGiniMetricByClass` | Per-output Gini (`2 * AUC - 1`) as a NumPy array, for reporting. |
+| `NaNGiniMetricAtN` | Weighted macro Gini; call with `prod_weights=` and `n=` to restrict to the first `n` target columns. |
+
+All metrics support finite, nonnegative row weights of shape `(n_samples,)` or
+`(n_samples, 1)`. NaN labels and zero-weight rows are excluded independently
+for each target. ROC AUC/Gini are undefined for outputs without positive
+weight in both classes; BCE is undefined for outputs without any positively
+weighted labels. Per-output results contain NaN for these outputs, and macro
+metrics exclude them. A scalar metric is NaN if no eligible output remains.
+Positive row weights are rescaled before aggregation so multiplying all
+weights by a common positive constant does not change the metric, subject
+to floating-point precision. All-zero weights produce an undefined metric.
+
+With early stopping enabled, an undefined (NaN) scalar metric on the last
+evaluation set raises a clear error instead of silently pruning to one tree.
+Choose an evaluation set and metric with enough observed, positively weighted
+labels, or set `es=0` to keep training and record NaN in the evaluation history.
+The per-class vector metrics are for reporting only.
+
+Observed targets must be `0` or `1`; `NaN` is the only missing-label marker.
+Training and evaluation labels are validated once in their original dtype
+before conversion to float32, including labels on zero-weight rows. A float64
+label such as `1.00000001` is rejected instead of being rounded to `1`.
+Predictions must be finite wherever a label
+has positive row weight; invalid predictions are reported as errors rather
+than treated as missing labels. BCE additionally requires probabilities in
+`[0, 1]`, while ROC AUC/Gini also accept finite decision scores.
+
+Output/product weights must follow target column order and are normalized
+over eligible, positively weighted outputs. `n` selects leading columns,
+not the outputs with the highest scores. Compared with custom implementations
+that return an unnormalized weighted sum, non-unit-sum weights therefore have
+different semantics. Standard `CrossValidation` is supported; `AdaptiveESCV`
+requires an explicit scorer for missing labels.
+
+`FilterSketch` supports zero Hessians from missing or zero-weight labels.
+Outputs with zero total Hessian are excluded from selection. If all remaining
+output importances are zero, selection uses a uniform distribution over the
+eligible outputs; if none remain, it raises an error identifying the lack of
+positive Hessian mass. The separate training-column check requires an observed
+label with positive row weight in each training output. Gradient squaring and
+per-leaf accumulation use float32 to limit GPU memory; reductions and probability
+normalization use float64. With the default BCE clipping and ordinary row
+weights, gradient magnitudes are well within the float32 range. Extreme weights
+or gradient scales can still cause overflow or underflow during squaring, and
+roundoff can affect importance estimates when leaf gradients nearly cancel.
+Float64 reductions do not remove these float32 training limitations. Zero
+gradients at an optimum are valid and do not trigger a missing-training-label
+error.
+
+For `BCEWithNaNLoss`, row weights are validated as finite and nonnegative
+before conversion. Training weights are stored as float32: overflow to infinity
+or conversion of a positive weight to zero raises an explicit representation
+error with the affected row indices. Training weights are not normalized, so
+their scale retains its effect on `lambda_l2`. Evaluation weights stay float64
+through `fit`, allowing metrics to handle weights such as `1e308` and `1e-308`.
+All-zero training weights are rejected by the per-output check; all-zero
+evaluation weights are allowed for reporting and produce an undefined metric.
+These strict validation and weighted-initialization policies apply only to
+`BCEWithNaNLoss`; existing losses retain their preprocessing and initial scores.
+
+GPU regression tests can be run with `python -m pytest -q tests`
+after installing Py-Boost, a compatible CuPy build, and pytest.

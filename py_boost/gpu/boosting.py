@@ -7,7 +7,7 @@ try:
 except Exception:
     pass
 from .base import Ensemble
-from .losses import loss_alias
+from .losses import Loss, loss_alias
 from .tree import DepthwiseTreeBuilder
 from .utils import pad_and_move, validate_input
 from ..callbacks.callback import EarlyStopping, EvalHistory, CallbackPipeline
@@ -295,19 +295,24 @@ class GradientBoosting(Ensemble):
         Returns:
             DepthwiseTreeBuilder, build_info
         """
-        # quantization
+        cp.random.seed(self.seed)
 
-        y = cp.array(y, order='C', dtype=cp.float32)
+        def prepare_target(target, weights, training):
+            prepare = getattr(self.loss, 'prepare_input', None)
+            if prepare is None:
+                # Keep custom losses implementing the original interface working.
+                return Loss.prepare_input(self.loss, target, weights, training=training)
+            return prepare(target, weights, training=training)
 
-        if sample_weight is not None:
-            sample_weight = cp.array(sample_weight, order='C', dtype=cp.float32)
+        y, sample_weight = prepare_target(y, sample_weight, training=True)
+        valid = [prepare_target(x['y'], x['sample_weight'], training=False) for x in eval_sets]
+        y_val = [target for target, _ in valid]
+        w_val = [weights for _, weights in valid]
+        initialize = getattr(self.loss, 'initial_score', None)
+        self.base_score = self.loss.base_score(y) if initialize is None else initialize(y, sample_weight)
 
         X_cp = pad_and_move(X_enc)
-
         X_val = [cp.array(x, order='C') for x in eval_enc]
-        y_val = [cp.array(x['y'], order='C', dtype=cp.float32) for x in eval_sets]
-        w_val = [None if x['sample_weight'] is None else cp.array(x['sample_weight'], order='C', dtype=cp.float32)
-                 for x in eval_sets]
 
         # save nfeatures for the feature importances
         self.nfeats = X.shape[1]
@@ -326,12 +331,6 @@ class GradientBoosting(Ensemble):
                                        max_depth=self.max_depth,
                                        max_bin=max_bin,
                                        )
-        cp.random.seed(self.seed)
-
-        y = self.loss.preprocess_input(y)
-        y_val = [self.loss.preprocess_input(x) for x in y_val]
-        self.base_score = self.loss.base_score(y)
-
         # init ensembles
         ens = cp.empty((y.shape[0], self.base_score.shape[0]), order='C', dtype=cp.float32)
         ens[:] = self.base_score
