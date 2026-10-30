@@ -57,8 +57,9 @@ def test_same_multilabel_data_for_different_sketch_methods():
 
 def test_k5_profile_changes_only_sketch_width_and_identity():
     from copy import deepcopy
-    original = load_suite()
+    original = load_suite(ROOT / 'suite-v1.json')
     k5 = load_suite(ROOT / 'suite-v1-k5.json')
+    assert load_suite() == k5
     assert k5['benchmark_id'] == 'pyboost-gpu-v1-k5'
     expected = deepcopy(original)
     expected['benchmark_id'] = k5['benchmark_id']
@@ -73,6 +74,20 @@ def test_k5_profile_changes_only_sketch_width_and_identity():
     before['params'] = dict(sketch_outputs=8)
     after['params'] = dict(sketch_outputs=5)
     assert make_data(before, 42)[-1] == make_data(after, 42)[-1]
+
+
+def test_cli_defaults_to_k5(monkeypatch, tmp_path):
+    captured = {}
+    def capture(args):
+        captured['suite'] = load_suite(args.suite)
+        return 0
+    monkeypatch.setattr(runner, 'run', capture)
+    monkeypatch.setattr(sys, 'argv', ['run.py', 'run', '--source', 'checkout',
+                                    '--device', '1', '--output', str(tmp_path)])
+    assert runner.main() == 0
+    assert captured['suite']['benchmark_id'] == 'pyboost-gpu-v1-k5'
+    assert all(c['params']['sketch_outputs'] == 5 for c in captured['suite']['cases']
+               if c['model'] == 'SketchBoost')
 
 
 def test_holdout_metrics_and_invalid_predictions():

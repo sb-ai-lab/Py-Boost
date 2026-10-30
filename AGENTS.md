@@ -4,10 +4,11 @@
 
 ## Required local GPU benchmark
 
-Before declaring a PR ready, run the complete `pyboost-gpu-v1` benchmark described
+Before declaring a PR ready, run the complete `pyboost-gpu-v1-k5` benchmark described
 in `benchmarks/README.md` against the PR's exact base and candidate commits, using
 the same harness, pinned environment and idle GPU. Use all 12 cases, one warmup
-and five timing repetitions; keep memory runs separate. Do not replace the suite
+and five timing repetitions, with `sketch_outputs=5` in every sketch case; keep
+memory runs separate. Do not replace the suite
 with a single sketch method, a small-output case, or an improvised timing script.
 
 - Commit library changes first. Record both code SHAs and the benchmark/data

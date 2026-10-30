@@ -17,11 +17,11 @@ import time
 import traceback
 
 if __package__:
-    from .protocol import (ROOT, SCHEMA_VERSION, comparison_errors, digest_json,
+    from .protocol import (DEFAULT_SUITE, ROOT, SCHEMA_VERSION, comparison_errors, digest_json,
                            implementation_hash, load_suite, make_data, quality, summarize)
     from .gpu import RssPeak, memory_tracker
 else:
-    from protocol import (ROOT, SCHEMA_VERSION, comparison_errors, digest_json,
+    from protocol import (DEFAULT_SUITE, ROOT, SCHEMA_VERSION, comparison_errors, digest_json,
                           implementation_hash, load_suite, make_data, quality, summarize)
     from gpu import RssPeak, memory_tracker
 
@@ -379,8 +379,8 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     command = commands.add_parser('run', help='Run one or more clean source checkouts')
     command.add_argument('--source', action='append', required=True, help='Git checkout; repeat to compare versions')
-    command.add_argument('--suite', type=Path, default=ROOT / 'suite-v1.json',
-                         help='Frozen suite manifest (default: suite-v1.json, k=8)')
+    command.add_argument('--suite', type=Path, default=DEFAULT_SUITE,
+                         help='Frozen suite manifest (default: suite-v1-k5.json, k=5)')
     command.add_argument('--output', required=True)
     command.add_argument('--device', required=True, help='One physical GPU index or UUID')
     command.add_argument('--python', default=sys.executable, help='Interpreter containing the pinned dependencies')

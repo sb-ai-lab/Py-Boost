@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent
+DEFAULT_SUITE = ROOT / 'suite-v1-k5.json'
 SCHEMA_VERSION = 1
 
 
@@ -24,7 +25,7 @@ def implementation_hash(suite=None):
 
 
 def load_suite(path=None):
-    return json.loads((Path(path) if path is not None else ROOT / 'suite-v1.json').read_text())
+    return json.loads((Path(path) if path is not None else DEFAULT_SUITE).read_text())
 
 
 def make_data(case, seed):

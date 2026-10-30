@@ -1,6 +1,6 @@
-# Py-Boost GPU benchmark v1
+# Py-Boost GPU benchmarks
 
-`pyboost-gpu-v1` is a fixed cross-version benchmark, not a collection of ad hoc
+`pyboost-gpu-v1-k5` is the default fixed cross-version benchmark, not a collection of ad hoc
 experiments. Run this harness against clean Git checkouts using the same Python
 environment and one otherwise idle NVIDIA GPU. A GitHub Actions GPU runner is
 not required. The tested library version is selected by `--source`, independently
@@ -8,17 +8,17 @@ of the directory containing the harness.
 
 ## Frozen workload
 
-Definitions are in `suite-v1.json`. All cases build **32 iterations**, use learning
+Default definitions are in `suite-v1-k5.json`. All cases build **32 iterations**, use learning
 rate 0.1, seed 42, full row/column sampling, and `use_hess=True`. Defaults are depth
-4 and 64 bins. Every sketch case explicitly sets **`sketch_outputs=8`**.
-Here **K** is the original number of outputs and **k=8** is the sketch width used
+4 and 64 bins. Every sketch case explicitly sets **`sketch_outputs=5`**.
+Here **K** is the original number of outputs and **k=5** is the sketch width used
 only for structure search; final predictions still contain all K outputs:
 
-- `proj`: eight projected components combining the original outputs.
-- `rand`: eight output draws with replacement, so at most eight distinct outputs.
-- `filter`: eight importance-weighted output draws with replacement, so at most
-  eight distinct outputs.
-- `topk`: eight distinct outputs with the largest gradient norms.
+- `proj`: five projected components combining the original outputs.
+- `rand`: five output draws with replacement, so at most five distinct outputs.
+- `filter`: five importance-weighted output draws with replacement, so at most
+  five distinct outputs.
+- `topk`: five distinct outputs with the largest gradient norms.
 - Full `GradientBoosting`: all K outputs, without a sketch.
 
 Early stopping is disabled. The benchmark counts executed iterations and
@@ -30,16 +30,16 @@ with `es=0`. Different retained tree counts are disclosed in comparisons.
 |---|---:|---:|---:|---:|---|
 | mse-single | 16384 / 4096 / 4096 | 32 | 1 | all | GradientBoosting |
 | mse-full-128 | 8192 / 2048 / 2048 | 32 | 128 | all | GradientBoosting |
-| mse-proj-32 | 16384 / 4096 / 4096 | 32 | 32 | 8 | SketchBoost/proj |
-| mse-proj-128 | 16384 / 4096 / 4096 | 32 | 128 | 8 | SketchBoost/proj |
-| mse-proj-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 8 | SketchBoost/proj |
-| mse-proj-10000 | 16384 / 4096 / 4096 | 32 | 10000 | 8 | SketchBoost/proj |
-| bce-rand-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 8 | SketchBoost/rand |
-| bce-filter-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 8 | SketchBoost/filter |
-| mse-topk-10000 | 4096 / 1024 / 1024 | 32 | 10000 | 8 | SketchBoost/topk |
-| ce-proj-512 | 16384 / 4096 / 4096 | 32 | 512 classes | 8 | SketchBoost/proj |
-| validation-proj-1024 | 8192 / 32768 / 4096 | 32 | 1024 | 8 | SketchBoost/proj; two validation sets |
-| histogram-topk-128 | 8192 / 2048 / 2048 | 128 | 128 | 8 | SketchBoost/topk; depth 8, 256 bins |
+| mse-proj-32 | 16384 / 4096 / 4096 | 32 | 32 | 5 | SketchBoost/proj |
+| mse-proj-128 | 16384 / 4096 / 4096 | 32 | 128 | 5 | SketchBoost/proj |
+| mse-proj-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 5 | SketchBoost/proj |
+| mse-proj-10000 | 16384 / 4096 / 4096 | 32 | 10000 | 5 | SketchBoost/proj |
+| bce-rand-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 5 | SketchBoost/rand |
+| bce-filter-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 5 | SketchBoost/filter |
+| mse-topk-10000 | 4096 / 1024 / 1024 | 32 | 10000 | 5 | SketchBoost/topk |
+| ce-proj-512 | 16384 / 4096 / 4096 | 32 | 512 classes | 5 | SketchBoost/proj |
+| validation-proj-1024 | 8192 / 32768 / 4096 | 32 | 1024 | 5 | SketchBoost/proj; two validation sets |
+| histogram-topk-128 | 8192 / 2048 / 2048 | 128 | 128 | 5 | SketchBoost/topk; depth 8, 256 bins |
 
 The four `mse-proj-*` cases change only the number of outputs. Other cases exercise
 full-output scoring, separate/shared Hessians, wide targets, validation memory,
@@ -73,15 +73,15 @@ git worktree add --detach ../Py-Boost-v0.5.2 v0.5.2
   --device 1 --output .benchmark-results/v052-vs-current
 ```
 
-For the same 12 workloads with `sketch_outputs=5`, select the separate frozen
-`pyboost-gpu-v1-k5` profile. The k=8 manifest remains unchanged; reports with
-different sketch widths are not comparable:
+The command above defaults to `sketch_outputs=5`. To reproduce the original
+`pyboost-gpu-v1` workload with `sketch_outputs=8`, explicitly select its unchanged
+manifest. Reports with different sketch widths are not comparable:
 
 ```bash
 .venv-benchmark/bin/python benchmarks/run.py run \
-  --suite benchmarks/suite-v1-k5.json \
+  --suite benchmarks/suite-v1.json \
   --source /path/to/baseline --source /path/to/candidate \
-  --device 1 --output .benchmark-results/k5-comparison
+  --device 1 --output .benchmark-results/k8-comparison
 ```
 
 Commit changes to `py_boost/` or `pyproject.toml` first: dirty library sources are
@@ -160,7 +160,7 @@ environment. Different GPUs/environments need separate baselines. Repeated runs
 can still differ due to temperature, clocks and scheduling: retain raw samples
 and investigate noise before calling a small difference a regression.
 
-Treat v1's data, cases and measurement semantics as frozen. New semantics/workloads
+Treat both profiles' data, cases and measurement semantics as frozen. New semantics/workloads
 need a new suite version. Any harness change alters its checksum and requires
 remeasuring both versions; never relabel old results to bypass that check.
 
