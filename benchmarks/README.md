@@ -164,8 +164,8 @@ Treat both profiles' data, cases and measurement semantics as frozen. New semant
 need a new suite version. Any harness change alters its checksum and requires
 remeasuring both versions; never relabel old results to bypass that check.
 
-Publish `comparison.md` in the PR and retain both `results.json` files and raw logs
-in the repository's separate `benchmark-results` branch or another explicitly
-agreed permanent location. Keep the measured code SHA unchanged when publishing
-reports. The runner itself performs no network writes. Do not commit local results
-or environment directories into the code branch.
+Publish the comparison table and run configuration in a PR comment. Retain both
+`results.json` files, raw logs and archives locally in the ignored output
+directory. Do not create result branches or upload artifacts unless explicitly
+requested. The runner itself performs no network writes. Do not commit local
+results or environment directories into the code branch.

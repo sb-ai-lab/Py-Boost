@@ -21,10 +21,10 @@ with a single sketch method, a small-output case, or an improvised timing script
 - Use `benchmarks/run.py compare` to produce the report; do not compare mismatched
   environments/workloads. Inspect time, peak live CuPy bytes, CPU RSS, holdout
   quality, executed iterations and retained tree counts.
-- When PR creation/update is authorized, publish the comparison table in the PR
-  and link both raw result sets from a permanent location, preferably the separate
-  `benchmark-results` branch. Publishing reports must not change the measured
-  library commit. For local-only work, provide paths to the saved reports.
+- When PR creation/update is authorized, publish the comparison table and run
+  configuration in a PR comment. Keep raw JSON, logs and archives locally in the
+  ignored output directory. Do not create result branches or upload artifacts
+  unless explicitly requested. For local-only work, provide saved report paths.
 - After changing the library code, rerun against the new candidate SHA. An earlier
   report does not verify later code changes. For a change to the harness itself,
   rerun both library versions with the final harness implementation.
