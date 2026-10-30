@@ -4,10 +4,10 @@ from itertools import count
 
 import joblib
 import numpy as np
-import tl2cgen
-import treelite
-from treelite.model_builder import Metadata, ModelBuilder, PostProcessorFunc, TreeAnnotation
 from tqdm import tqdm
+
+from .tl2cgen_compat import tl2cgen, treelite
+from treelite.model_builder import Metadata, ModelBuilder, PostProcessorFunc, TreeAnnotation
 
 
 def parse_pb_tree(tree, builder):
