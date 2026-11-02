@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_SUITE = ROOT / 'suite-v1-k5.json'
+DEFAULT_SUITE = ROOT / 'suite-delicious-paper-v1-k5.json'
 SCHEMA_VERSION = 1
 
 
@@ -18,7 +18,7 @@ def digest_json(value):
 def implementation_hash(suite=None):
     digest = hashlib.sha256()
     digest.update(digest_json(load_suite() if suite is None else suite).encode())
-    for name in ['protocol.py', 'gpu.py', 'run.py']:
+    for name in ['protocol.py', 'gpu.py', 'run.py', 'delicious.py']:
         digest.update(name.encode())
         digest.update((ROOT / name).read_bytes())
     return digest.hexdigest()
@@ -28,8 +28,14 @@ def load_suite(path=None):
     return json.loads((Path(path) if path is not None else DEFAULT_SUITE).read_text())
 
 
-def make_data(case, seed):
+def make_data(case, seed, data_dir=None):
     """PCG64, float32 inputs, eight correlated output groups, no external data."""
+    if case.get('dataset') == 'delicious':
+        if __package__:
+            from .delicious import load_fold
+        else:
+            from delicious import load_fold
+        return load_fold(case, seed, data_dir)
     rng = np.random.Generator(np.random.PCG64(seed))
     n = case['train'] + case['valid'] + case['test']
     X = rng.standard_normal((n, case['features']), dtype=np.float32)
@@ -72,7 +78,7 @@ def make_data(case, seed):
     return X[:t], y[:t], validation, X[v:], y[v:], digest.hexdigest()
 
 
-def quality(task, target, prediction):
+def quality(task, target, prediction, clip=1e-15):
     """Holdout metric outside timed regions, with bounded float64 temporaries."""
     if not np.isfinite(prediction).all():
         raise ValueError('Non-finite predictions')
@@ -93,7 +99,7 @@ def quality(task, target, prediction):
         else:
             if p.shape != y.shape:
                 raise ValueError('Prediction output count differs from target')
-            p = np.clip(p, 1e-15, 1 - 1e-15)
+            p = np.clip(p, clip, 1 - clip)
             values = -(y * np.log(p) + (1 - y) * np.log1p(-p))
         total += float(values.sum())
         count += values.size

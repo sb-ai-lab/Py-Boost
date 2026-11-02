@@ -47,7 +47,7 @@ def test_datasets_are_reproducible_and_separated(task):
 
 
 def test_same_multilabel_data_for_different_sketch_methods():
-    suite = load_suite()
+    suite = load_suite(ROOT / 'suite-v1-k5.json')
     rand, filt = [next(c for c in suite['cases'] if c['id'] == name)
                   for name in ['bce-rand-1024', 'bce-filter-1024']]
     for case in [rand, filt]:
@@ -59,7 +59,6 @@ def test_k5_profile_changes_only_sketch_width_and_identity():
     from copy import deepcopy
     original = load_suite(ROOT / 'suite-v1.json')
     k5 = load_suite(ROOT / 'suite-v1-k5.json')
-    assert load_suite() == k5
     assert k5['benchmark_id'] == 'pyboost-gpu-v1-k5'
     expected = deepcopy(original)
     expected['benchmark_id'] = k5['benchmark_id']
@@ -85,7 +84,7 @@ def test_cli_defaults_to_k5(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, 'argv', ['run.py', 'run', '--source', 'checkout',
                                     '--device', '1', '--output', str(tmp_path)])
     assert runner.main() == 0
-    assert captured['suite']['benchmark_id'] == 'pyboost-gpu-v1-k5'
+    assert captured['suite']['benchmark_id'] == 'pyboost-delicious-paper-v1-k5'
     assert all(c['params']['sketch_outputs'] == 5 for c in captured['suite']['cases']
                if c['model'] == 'SketchBoost')
 

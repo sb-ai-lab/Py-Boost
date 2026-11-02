@@ -1,0 +1,522 @@
+{
+  "benchmark_id": "pyboost-delicious-paper-v1-k5",
+  "data_seed": 42,
+  "model_seed": 42,
+  "cpu_threads": 8,
+  "warmups": 1,
+  "repeats": 1,
+  "sketch_params": {
+    "proj": {
+      "norm": true
+    },
+    "rand": {
+      "smooth": 0.1,
+      "replace": true
+    },
+    "filter": {
+      "sample": true,
+      "smooth": 0.1,
+      "ntrees": 1
+    },
+    "topk": {}
+  },
+  "common_params": {
+    "ntrees": 20000,
+    "max_depth": 12,
+    "max_bin": 256,
+    "lr": 0.015,
+    "es": 500,
+    "verbose": 1000000,
+    "min_data_in_leaf": 76,
+    "colsample": 1.0,
+    "subsample": 0.623613094287341,
+    "use_hess": false,
+    "lambda_l2": 13.057198025783617,
+    "gd_steps": 1,
+    "min_gain_to_split": 0,
+    "quantization": "Quantile",
+    "quant_sample": 2000000,
+    "min_data_in_bin": 3
+  },
+  "cases": [
+    {
+      "id": "delicious-full-fold0",
+      "dataset": "delicious",
+      "fold": 0,
+      "group": "delicious-full",
+      "task": "multilabel",
+      "model": "GradientBoosting",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {}
+    },
+    {
+      "id": "delicious-full-fold1",
+      "dataset": "delicious",
+      "fold": 1,
+      "group": "delicious-full",
+      "task": "multilabel",
+      "model": "GradientBoosting",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {}
+    },
+    {
+      "id": "delicious-full-fold2",
+      "dataset": "delicious",
+      "fold": 2,
+      "group": "delicious-full",
+      "task": "multilabel",
+      "model": "GradientBoosting",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {}
+    },
+    {
+      "id": "delicious-full-fold3",
+      "dataset": "delicious",
+      "fold": 3,
+      "group": "delicious-full",
+      "task": "multilabel",
+      "model": "GradientBoosting",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {}
+    },
+    {
+      "id": "delicious-full-fold4",
+      "dataset": "delicious",
+      "fold": 4,
+      "group": "delicious-full",
+      "task": "multilabel",
+      "model": "GradientBoosting",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {}
+    },
+    {
+      "id": "delicious-topk-fold0",
+      "dataset": "delicious",
+      "fold": 0,
+      "group": "delicious-topk",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "topk",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-topk-fold1",
+      "dataset": "delicious",
+      "fold": 1,
+      "group": "delicious-topk",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "topk",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-topk-fold2",
+      "dataset": "delicious",
+      "fold": 2,
+      "group": "delicious-topk",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "topk",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-topk-fold3",
+      "dataset": "delicious",
+      "fold": 3,
+      "group": "delicious-topk",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "topk",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-topk-fold4",
+      "dataset": "delicious",
+      "fold": 4,
+      "group": "delicious-topk",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "topk",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-rand-fold0",
+      "dataset": "delicious",
+      "fold": 0,
+      "group": "delicious-rand",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "rand",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-rand-fold1",
+      "dataset": "delicious",
+      "fold": 1,
+      "group": "delicious-rand",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "rand",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-rand-fold2",
+      "dataset": "delicious",
+      "fold": 2,
+      "group": "delicious-rand",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "rand",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-rand-fold3",
+      "dataset": "delicious",
+      "fold": 3,
+      "group": "delicious-rand",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "rand",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-rand-fold4",
+      "dataset": "delicious",
+      "fold": 4,
+      "group": "delicious-rand",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "rand",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-proj-fold0",
+      "dataset": "delicious",
+      "fold": 0,
+      "group": "delicious-proj",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "proj",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-proj-fold1",
+      "dataset": "delicious",
+      "fold": 1,
+      "group": "delicious-proj",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "proj",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-proj-fold2",
+      "dataset": "delicious",
+      "fold": 2,
+      "group": "delicious-proj",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "proj",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-proj-fold3",
+      "dataset": "delicious",
+      "fold": 3,
+      "group": "delicious-proj",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "proj",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-proj-fold4",
+      "dataset": "delicious",
+      "fold": 4,
+      "group": "delicious-proj",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "proj",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-filter-fold0",
+      "dataset": "delicious",
+      "fold": 0,
+      "group": "delicious-filter",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "filter",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-filter-fold1",
+      "dataset": "delicious",
+      "fold": 1,
+      "group": "delicious-filter",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "filter",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-filter-fold2",
+      "dataset": "delicious",
+      "fold": 2,
+      "group": "delicious-filter",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "filter",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-filter-fold3",
+      "dataset": "delicious",
+      "fold": 3,
+      "group": "delicious-filter",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "filter",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "delicious-filter-fold4",
+      "dataset": "delicious",
+      "fold": 4,
+      "group": "delicious-filter",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 10336,
+      "valid": 2584,
+      "test": 3185,
+      "features": 500,
+      "outputs": 983,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "filter",
+        "sketch_outputs": 5
+      }
+    }
+  ],
+  "warmup_iterations": 32,
+  "timeout": 86400,
+  "dataset": {
+    "name": "Delicious",
+    "rows": 16105,
+    "features": 500,
+    "outputs": 983,
+    "archive_sha256": "9a4e79e9bd1835225e59eef09ba0ee29c5430f785045a9245943511836542806",
+    "normalized_sha256": "a53ca49cdce00c38f90225994ba01e6b352e9445d121df35fcd177a1cbd5c676",
+    "source": "https://arxiv.org/html/2211.12858v1",
+    "reference_commit": "e479fde7a0dd5f624fd9efd654e2d192a12d325d",
+    "official_split_column": 0,
+    "cv": {
+      "folds": 5,
+      "shuffle": true,
+      "random_state": 42
+    },
+    "metric_clip": 1e-07
+  }
+}

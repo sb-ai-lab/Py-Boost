@@ -1,171 +1,162 @@
-# Py-Boost GPU benchmarks
+# Delicious GPU benchmark
 
-`pyboost-gpu-v1-k5` is the default fixed cross-version benchmark, not a collection of ad hoc
-experiments. Run this harness against clean Git checkouts using the same Python
-environment and one otherwise idle NVIDIA GPU. A GitHub Actions GPU runner is
-not required. The tested library version is selected by `--source`, independently
-of the directory containing the harness.
+The default `pyboost-delicious-paper-v1-k5` compares library revisions on the real
+**Delicious** multilabel dataset from the
+[SketchBoost paper, Appendix B](https://arxiv.org/html/2211.12858v1#A2).
+It follows the paper's evaluation protocol and chosen hyperparameters, without
+rerunning hyperparameter search or competing libraries. It can take hours on one
+GPU; the old ten-minute synthetic budget no longer applies.
 
-## Frozen workload
+## Frozen data and protocol
 
-Default definitions are in `suite-v1-k5.json`. All cases build **32 iterations**, use learning
-rate 0.1, seed 42, full row/column sampling, and `use_hess=True`. Defaults are depth
-4 and 64 bins. Every sketch case explicitly sets **`sketch_outputs=5`**.
-Here **K** is the original number of outputs and **k=5** is the sketch width used
-only for structure search; final predictions still contain all K outputs:
+Delicious has **16105 rows, 500 features and 983 binary labels**. Download the
+original 1.3 MB archive selected by the
+[paper's download script](https://github.com/sb-ai-lab/SketchBoost-paper/blob/e479fde7a0dd5f624fd9efd654e2d192a12d325d/get_data.sh),
+not Delicious-200K. The harness checks the archive and every input file's SHA-256
+before parsing dense float32 arrays. The NPZ cache is loaded with
+`allow_pickle=False`; no external pickle is loaded. Preparation is outside timing.
 
-- `proj`: five projected components combining the original outputs.
-- `rand`: five output draws with replacement, so at most five distinct outputs.
-- `filter`: five importance-weighted output draws with replacement, so at most
-  five distinct outputs.
-- `topk`: five distinct outputs with the largest gradient norms.
-- Full `GradientBoosting`: all K outputs, without a sketch.
+Following the [reference preprocessing](https://github.com/sb-ai-lab/SketchBoost-paper/blob/e479fde7a0dd5f624fd9efd654e2d192a12d325d/preprocess.py),
+use column zero of the official split files, preserving order and converting
+one-based indices. There are **12920 train / 3185 test** rows. Following the
+[reference runner](https://github.com/sb-ai-lab/SketchBoost-paper/blob/e479fde7a0dd5f624fd9efd654e2d192a12d325d/runner.py),
+apply `KFold(5, shuffle=True, random_state=42)` only to train: every fold has
+**10336 train / 2584 validation** rows. All five models are independently evaluated
+on the untouched 3185-row test set. Do not average their predictions into an
+ensemble. Model seed is 42; CPU thread count is eight.
 
-Early stopping is disabled. The benchmark counts executed iterations and
-separately records retained
-trees: existing Py-Boost versions can prune to the best validation iteration even
-with `es=0`. Different retained tree counts are disclosed in comparisons.
+Archive SHA-256:
+`9a4e79e9bd1835225e59eef09ba0ee29c5430f785045a9245943511836542806`.
+Normalized float32 data and ordered split SHA-256:
+`a53ca49cdce00c38f90225994ba01e6b352e9445d121df35fcd177a1cbd5c676`.
+Every worker verifies the normalized cache and records a fold checksum covering
+the actual dataset plus ordered train, validation and test indices.
 
-| Case | Train / validation / test rows | Features | Outputs K | Sketch width k | Model |
-|---|---:|---:|---:|---:|---|
-| mse-single | 16384 / 4096 / 4096 | 32 | 1 | all | GradientBoosting |
-| mse-full-128 | 8192 / 2048 / 2048 | 32 | 128 | all | GradientBoosting |
-| mse-proj-32 | 16384 / 4096 / 4096 | 32 | 32 | 5 | SketchBoost/proj |
-| mse-proj-128 | 16384 / 4096 / 4096 | 32 | 128 | 5 | SketchBoost/proj |
-| mse-proj-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 5 | SketchBoost/proj |
-| mse-proj-10000 | 16384 / 4096 / 4096 | 32 | 10000 | 5 | SketchBoost/proj |
-| bce-rand-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 5 | SketchBoost/rand |
-| bce-filter-1024 | 16384 / 4096 / 4096 | 32 | 1024 | 5 | SketchBoost/filter |
-| mse-topk-10000 | 4096 / 1024 / 1024 | 32 | 10000 | 5 | SketchBoost/topk |
-| ce-proj-512 | 16384 / 4096 / 4096 | 32 | 512 classes | 5 | SketchBoost/proj |
-| validation-proj-1024 | 8192 / 32768 / 4096 | 32 | 1024 | 5 | SketchBoost/proj; two validation sets |
-| histogram-topk-128 | 8192 / 2048 / 2048 | 128 | 128 | 5 | SketchBoost/topk; depth 8, 256 bins |
+The frozen manifest is `suite-delicious-paper-v1-k5.json`:
 
-The four `mse-proj-*` cases change only the number of outputs. Other cases exercise
-full-output scoring, separate/shared Hessians, wide targets, validation memory,
-and deep histograms. No sketch method is treated as the primary benchmark.
-SVD requires an additional RAPIDS stack and is outside v1. Missing-label losses
-are outside v1 to keep this suite runnable against released 0.5.2 as well as newer
-versions; add such workloads under a new suite ID.
+| Parameter | Value |
+|---|---:|
+| Loss / validation metric | binary cross-entropy over all labels and rows |
+| Maximum iterations | 20000 |
+| Learning rate | 0.015 |
+| Early stopping patience | 500 |
+| Maximum depth | 12 |
+| Maximum bins | 256 |
+| Minimum data in leaf | 76 |
+| Row sampling | 0.623613094287341 |
+| L2 leaf regularization | 13.057198025783617 |
+| Column sampling | 1.0 |
+| `use_hess` | false |
 
-Data are generated by `protocol.make_data` using PCG64 seed 20261030, float32
-features/targets and eight correlated output groups. Regression has additive
-noise; multilabel targets are Bernoulli draws from signal-dependent probabilities.
-Multiclass labels encode feature signs, with all classes represented in training.
-Generation uses no matrix multiplication or external downloads. SHA-256 covers
-the actual feature and target bytes. Validation/test rows are held out. The rand
-and filter cases receive identical data.
+The unrounded parameters are copied into plain JSON from the Delicious/CatBoost
+entry of the paper's
+[`runs/baselines_and_params.pkl`](https://github.com/sb-ai-lab/SketchBoost-paper/blob/e479fde7a0dd5f624fd9efd654e2d192a12d325d/runs/baselines_and_params.pkl).
+Sharing CatBoost's parameters with SketchBoost and disabling Hessians in split
+scoring follows the experiment code. The tested checkout supplies the actual
+sketch implementations: this compares library revisions, rather than pinning the
+2022 library. No hyperparameter search runs during PR checks.
 
-## Environment and commands
+| Method | Outputs K | Sketch width k | Coverage |
+|---|---:|---:|---|
+| Full GradientBoosting, single output group | 983 | all 983 | Paper baseline: no sketch |
+| SketchBoost/topk | 983 | 5 | Paper: Top Outputs |
+| SketchBoost/rand | 983 | 5 | Paper: Random Sampling |
+| SketchBoost/proj | 983 | 5 | Paper: Random Projections |
+| SketchBoost/filter | 983 | 5 | Additional library coverage, outside the paper |
 
-The reference stack is Linux, Python 3.12 and CUDA 12. Install the complete pinned
-dependency closure in a dedicated environment. This file deliberately does not
-install a particular Py-Boost revision; install metadata once, then select each
-tested checkout through `--source`.
+There are **25 cases**: five methods × five folds. `sketch_outputs=5` affects only
+structure search; leaves and predictions retain all 983 labels. `topk` chooses
+five distinct labels; `rand`/`filter` make five draws with replacement (at most
+five distinct labels); `proj` creates five components. The paper also sweeps other
+k values; this required profile fixes k=5 as requested.
+
+## Run and resume
+
+Use Linux, Python 3.12 and CUDA 12 with the pinned dependency closure. The harness
+is independent of tested checkouts, selected by `--source`.
 
 ```bash
 uv venv --python 3.12 .venv-benchmark
 uv pip install --python .venv-benchmark/bin/python -r benchmarks/requirements-py312-cu12.txt
 uv pip install --python .venv-benchmark/bin/python --no-deps -e .
-git worktree add --detach ../Py-Boost-v0.5.2 v0.5.2
+.venv-benchmark/bin/python benchmarks/run.py prepare-data
 .venv-benchmark/bin/python benchmarks/run.py run \
-  --source ../Py-Boost-v0.5.2 --source . \
-  --device 1 --output .benchmark-results/v052-vs-current
+  --source /path/to/base --source /path/to/candidate \
+  --device 1 --output .benchmark-results/delicious-comparison
 ```
 
-The command above defaults to `sketch_outputs=5`. To reproduce the original
-`pyboost-gpu-v1` workload with `sketch_outputs=8`, explicitly select its unchanged
-manifest. Reports with different sketch widths are not comparable:
+For offline preparation, use `prepare-data --archive /path/to/Delicious.zip`.
+A different archive is rejected. Pass `--data-dir /path/to/cache` to preparation
+and run when using a nondefault cache. Workers never download data implicitly.
 
-```bash
-.venv-benchmark/bin/python benchmarks/run.py run \
-  --suite benchmarks/suite-v1.json \
-  --source /path/to/baseline --source /path/to/candidate \
-  --device 1 --output .benchmark-results/k8-comparison
-```
+Exactly **one physical GPU** runs both versions, all methods/folds and measurement
+phases sequentially. Select an index or UUID; only that UUID is exposed as logical
+CUDA device zero. Multiple visible GPUs or other compute processes on the GPU
+are rejected. Reports include model, physical/CUDA-visible VRAM, UUID, PCI bus,
+compute capability, SM count, memory bus width, power, maximum SM clock and
+NVIDIA/CUDA driver/runtime versions. Use the same idle GPU and environment for
+both versions. GitHub Actions does not need a GPU worker.
 
-Commit changes to `py_boost/` or `pyproject.toml` first: dirty library sources are
-rejected. **Exactly one physical GPU is used for the entire run.** Use a physical
-GPU index or UUID (`nvidia-smi -L`). `--device 1` selects only physical GPU #1; it
-is resolved to its physical UUID and exposed inside each worker as logical
-`cuda:0` through `CUDA_VISIBLE_DEVICES`. UUID selection avoids differences between
-CUDA and `nvidia-smi` ordinal ordering.
-A comma-separated GPU list is rejected, and workers verify that exactly one CUDA
-device is visible. Cases, versions and measurement phases run sequentially.
-Do not share the selected GPU with another workload. Preflight performs a real allocation/kernel, rejects other
-compute processes on the GPU, and records its UUID. CPU thread counts are fixed at
-4. No GPU is a failure, not a skipped or CPU-emulated benchmark.
+Commit library changes before running. Reports record source SHAs, imported paths
+and source checksums; cases alternate version order. Each method/fold is saved in
+`<output>/<commit>/results.json` alongside raw worker jobs, results and logs.
+Default timeout is **24 hours per worker**, including warmup, timing and memory.
+Failed cases, OOM and timeouts are failures, never skipped passes.
 
-Each source produces `<output>/<commit-prefix>/results.json` and raw worker
-requests/results/logs. GPU count, model, physical and CUDA-visible VRAM, UUID,
-PCI bus, compute capability, SM count, memory bus width, power limit, maximum SM
-clock and NVIDIA/CUDA driver/runtime versions are recorded
-in JSON and displayed in the comparison report. Each comparison row shows the
-full output count K and sketch width k/method explicitly.
-Two-source runs also produce `comparison.md`. More than two
-sources may be measured in one run; compare any two results afterward:
+Repeat the same command with `--resume` to skip completed cases and retry unfinished
+or failed cases. It refuses different source SHAs, suite, harness, environment,
+case selection or repeat counts. Stop the original run before resuming. Without
+`--resume`, output must be empty. Per-worker logs show progress every 500 iterations.
+
+`--case delicious-proj-fold0` is a diagnostic subset and never fulfills the full
+requirement. `--repeats` changes repetitions **within each fold**; the default is
+**one**, not five. All five CV folds are required.
+
+## Measurement and publication
+
+Each version/method/fold runs in a fresh subprocess. Warmup uses 32 iterations on
+that fold and is excluded from timing. It does not run 20000 warmup iterations.
+
+1. Fit one fresh model with up to 20000 iterations and validation early stopping.
+   Time fit and test prediction separately using CUDA synchronization and
+   `perf_counter`. Fit includes quantization, transfers and validation.
+2. Score test predictions outside timers: binary cross-entropy averaged over
+   labels/rows, clipping probabilities to `[1e-7, 1-1e-7]` as in the paper. Use
+   bounded float64 accumulation. Test data never control stopping.
+3. Fit and predict with another fresh model for memory measurement. Hooks and RSS
+   sampling are disabled during timing. Record peak live rounded CuPy allocations
+   (including Py-Boost's private fit pool) and CPU RSS sampled every 5 ms. GPU peaks
+   exclude context, free pool cache and external allocations; they are not total
+   process VRAM. CPU RSS includes resident input data and can miss short peaks.
+
+The summary reports **five-fold means ± population standard deviations** for fit,
+prediction and test log loss, plus maximum fit GPU allocation across folds. JSON
+preserves each fold's timing/memory, test quality, executed iterations and retained
+trees for both phases. Folds are different datasets, not five repeats of one fit.
+The per-fold table and iteration/tree counts follow the summary. Faster convergence
+must be assessed together with work performed and quality.
+
+Two-source runs generate `comparison.md`. Saved reports can be compared with:
 
 ```bash
 .venv-benchmark/bin/python benchmarks/run.py compare \
-  .benchmark-results/older/COMMIT/results.json \
-  .benchmark-results/newer/COMMIT/results.json \
-  --output .benchmark-results/comparison.md
+  .benchmark-results/run/BASE_SHA/results.json \
+  .benchmark-results/run/CANDIDATE_SHA/results.json \
+  --output .benchmark-results/run/comparison.md
 ```
 
-`--python /path/to/environment/bin/python` selects the worker interpreter.
-`--case mse-single --repeats 1` is a diagnostic subset, not the mandatory full
-profile. Output directories must be empty so previous evidence is not overwritten.
-Workers have a 900-second timeout including setup/warmup and both phases; failures and OOM retain
-logs/results, and the command exits nonzero. A version lacking a required API is
-reported as failed, not silently replaced by another implementation.
+Comparison rejects mismatched workloads, datasets, environments and failed runs.
+Partial runs are marked `full_suite: false`. Measurements are not automatic
+statistical verdicts or a claim of exactly matching the paper's scores/timings on
+different hardware/software. Repeated runs can vary with GPU clocks and temperature.
 
-## Measurement contract
+Publish the table and run configuration in a PR comment. Keep raw JSON, logs,
+archives and cached data locally in ignored directories. Do not create result
+branches or upload artifacts unless explicitly requested. The runner performs no
+network writes; only `prepare-data` downloads the pinned archive.
 
-- Each case/version uses a fresh subprocess. When multiple
-  versions are measured, their order alternates by case.
-- Each subprocess generates and hashes data, then warms one complete fit/predict.
-  Data generation, imports, JIT warmup and estimator construction are excluded
-  from timing. Quantization, CPU/GPU transfers and evaluation inside `fit()` are
-  included. Prediction receives CPU input and includes transfers back to CPU.
-- Timing uses five fresh-model repetitions, `perf_counter` and device-wide CUDA
-  synchronization. Raw samples, median and p10/p90 are retained. These are warmed
-  timings, not cold-start latency. Holdout scoring is outside the timers.
-- After the timing repetitions, memory uses a separate fresh-model fit/predict in
-  the same subprocess. Hooks/RSS sampling are disabled during timing. Keeping
-  both phases in one process avoids repeating Numba import-time compilation.
-  CuPy malloc/free hooks track **peak live rounded allocation bytes**, including
-  Py-Boost's private fit pool. This excludes free pool cache, CUDA context and
-  allocations outside CuPy's hooked pools; it is not total process VRAM.
-  Prediction tracking includes still-live allocations observed during fit.
-- CPU RSS is sampled every 5 ms during fit/predict and includes the resident input
-  dataset. It is an approximation and may miss very short peaks. Absolute peaks
-  and the fit baseline are stored.
-- Holdout RMSE or log loss is computed in bounded float64 blocks. Every prediction
-  must be finite and have the expected shape. Metric samples, actual iteration
-  counts and retained tree counts are stored, so faster runs can be assessed
-  together with model quality and work performed.
-
-## Cross-version comparability and publication
-
-Reports identify the exact library commit and library-source checksum, benchmark
-implementation checksum, manifest checksum, actual dataset checksum, GPU UUID,
-CPU/OS, Python, relevant dependency versions, CUDA driver/runtime, repetitions and
-warmups. `compare` refuses mismatched workloads, datasets, environments or failed
-measurements (exit code 2). Partial runs are marked `full_suite: false`; only a full
-five-repeat run satisfies the PR requirement. Comparison tables show measured
-changes, not an automatic statistical pass/fail verdict.
-
-To compare historical versions, run them through **this same harness** and pinned
-environment. Different GPUs/environments need separate baselines. Repeated runs
-can still differ due to temperature, clocks and scheduling: retain raw samples
-and investigate noise before calling a small difference a regression.
-
-Treat both profiles' data, cases and measurement semantics as frozen. New semantics/workloads
-need a new suite version. Any harness change alters its checksum and requires
-remeasuring both versions; never relabel old results to bypass that check.
-
-Publish the comparison table and run configuration in a PR comment. Retain both
-`results.json` files, raw logs and archives locally in the ignored output
-directory. Do not create result branches or upload artifacts unless explicitly
-requested. The runner itself performs no network writes. Do not commit local
-results or environment directories into the code branch.
+Legacy synthetic workloads remain selectable with `--suite
+benchmarks/suite-v1-k5.json` or `--suite benchmarks/suite-v1.json` (k=8); see
+[SYNTHETIC.md](SYNTHETIC.md). They do not fulfill the Delicious requirement. Frozen
+workloads, data, splits or measurement changes require a new suite ID and rerunning
+both library versions with the same final harness.

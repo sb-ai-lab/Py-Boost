@@ -4,12 +4,16 @@
 
 ## Required local GPU benchmark
 
-Before declaring a PR ready, run the complete `pyboost-gpu-v1-k5` benchmark described
-in `benchmarks/README.md` against the PR's exact base and candidate commits, using
-the same harness, pinned environment and idle GPU. Use all 12 cases, one warmup
-and five timing repetitions, with `sketch_outputs=5` in every sketch case; keep
-memory runs separate. Do not replace the suite
-with a single sketch method, a small-output case, or an improvised timing script.
+Before declaring a PR ready, run the complete `pyboost-delicious-paper-v1-k5`
+benchmark described in `benchmarks/README.md` against the PR's exact base and
+candidate commits, using the same harness, pinned environment and idle GPU.
+Use all 25 method/fold cases: five methods, five shuffled train folds, the official
+held-out test set, all 983 labels and `sketch_outputs=5` in every sketch case.
+Use the paper's parameters, up to 20000 iterations and early stopping after 500
+rounds. Each fold has one timing run after a 32-iteration warmup and a separate
+full memory run. Five CV folds are not five timing repetitions. Do not substitute
+synthetic data, truncate the iteration limit or drop methods/folds in a required
+run. This protocol can take hours; there is no ten-minute limit.
 
 - Commit library changes first. Record both code SHAs and the benchmark/data
   checksums. Verify that the imported library comes from the intended checkout.
@@ -33,5 +37,5 @@ with a single sketch method, a small-output case, or an improvised timing script
   such a PR as benchmark-verified. Request an explicit user waiver when needed.
 
 The frozen benchmark is for version-to-version comparisons. Keep its cases,
-generation and measurement semantics stable; introduce a new suite version when
+data, splits and measurement semantics stable; introduce a new suite version when
 these semantics change. GPU unit tests remain required and do not replace it.

@@ -118,6 +118,8 @@ def worker(job):
     import psutil
 
     logging.disable(logging.CRITICAL)
+    if job.get('implementation_hash', implementation_hash(job['suite'])) != implementation_hash(job['suite']):
+        raise RuntimeError('Benchmark harness changed after the run started')
     cp.cuda.Device(0).use()
     metadata = environment(cp, np, psutil, job['device'])
     if job['phase'] == 'metadata':
@@ -130,7 +132,7 @@ def worker(job):
     if source_info(expected) != job['source']:
         raise RuntimeError('Library source changed after the run started')
     case, suite = job['case'], job['suite']
-    X, y, valid, test_X, test_y, data_hash = make_data(case, suite['data_seed'])
+    X, y, valid, test_X, test_y, data_hash = make_data(case, suite['data_seed'], job.get('data_dir'))
     params = dict(suite['common_params'], **case['params'])
     params.update(loss=case['loss'], seed=suite['model_seed'])
     if case['model'] == 'SketchBoost':
@@ -143,11 +145,13 @@ def worker(job):
 
         def after_iteration(self, info):
             self.count += 1
+            if self.count % 500 == 0:
+                print(f'{case["id"]}: {self.count} iterations', flush=True)
             return False
 
-    def new_model():
+    def new_model(overrides=None):
         counter = Iterations()
-        model = getattr(py_boost, case['model'])(**params, callbacks=[counter])
+        model = getattr(py_boost, case['model'])(**dict(params, **(overrides or {})), callbacks=[counter])
         return model, counter
 
     def cleanup(model):
@@ -160,7 +164,7 @@ def worker(job):
         cp.cuda.Device(0).synchronize()
 
     for _ in range(suite['warmups']):
-        warm, _ = new_model()
+        warm, _ = new_model({'ntrees': suite['warmup_iterations']} if 'warmup_iterations' in suite else None)
         warm.fit(X, y, eval_sets=valid)
         warm.predict(test_X)
         sync()
@@ -198,15 +202,21 @@ def worker(job):
                               'fit_rss_peak_bytes': rss_fit.peak,
                               'predict_rss_peak_bytes': rss_predict.peak,
                               'fit_rss_baseline_bytes': rss_fit.baseline}
-            if counter.count != params['ntrees']:
+            if not 1 <= counter.count <= params['ntrees']:
+                raise RuntimeError(f'Invalid executed iteration count: {counter.count}')
+            if not params['es'] and counter.count != params['ntrees']:
                 raise RuntimeError(f'Expected {params["ntrees"]} iterations, got {counter.count}')
             if prediction.shape != (case['test'], case['outputs']):
                 raise RuntimeError(f'Unexpected prediction shape: {prediction.shape}')
-            score = quality(case['task'], test_y, prediction)
+            score = quality(case['task'], test_y, prediction,
+                            clip=suite.get('dataset', {}).get('metric_clip', 1e-15))
             if not np.isfinite(score['value']):
                 raise RuntimeError('Non-finite holdout metric')
             measurements.append({'trained_iterations': counter.count,
-                                 'retained_trees': len(model.models), 'quality': score})
+                                 'retained_trees': len(model.models), 'quality': score,
+                                 'stopped_early': counter.count < params['ntrees']})
+            print(f'{case["id"]} {phase}: iterations={counter.count}, retained={len(model.models)}, '
+                  f'test {score["name"]}={score["value"]:.8f}', flush=True)
             cleanup(model)
             del model, prediction
         result = {'status': 'ok', 'environment': metadata, 'data_hash': data_hash,
@@ -264,6 +274,9 @@ def invoke(python, output, job, timeout):
 
 def run(args):
     suite = load_suite(args.suite)
+    harness_hash = implementation_hash(suite)
+    args.repeats = suite['repeats'] if args.repeats is None else args.repeats
+    args.timeout = suite.get('timeout', 900) if args.timeout is None else args.timeout
     sources = [source_info(p) for p in args.source]
     if len({s['commit'] for s in sources}) != len(sources):
         raise ValueError('Each source must have a different commit')
@@ -274,30 +287,42 @@ def run(args):
         raise ValueError('Repeats and timeout must be positive')
     if ',' in args.device or not args.device:
         raise ValueError('Select exactly one GPU index or UUID')
+    if suite.get('dataset', {}).get('name') == 'Delicious':
+        if not (Path(args.data_dir) / 'delicious.npz').is_file():
+            raise ValueError('Run benchmarks/run.py prepare-data before benchmarking Delicious')
     device = resolve_gpu(args.device)
     cases = [c for c in suite['cases'] if c['id'] in selected]
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    if any(output.iterdir()):
+    if any(output.iterdir()) and not args.resume:
         raise ValueError('Output directory must be empty; preserve previous measurements')
     reports, directories = [], []
     for source in sources:
         directory = output / source['commit'][:12]
-        (directory / 'raw').mkdir(parents=True)
+        (directory / 'raw').mkdir(parents=True, exist_ok=True)
         report = {'schema_version': SCHEMA_VERSION, 'benchmark_id': suite['benchmark_id'],
-                  'implementation_hash': implementation_hash(suite), 'suite_hash': digest_json(suite),
+                  'implementation_hash': harness_hash, 'suite_hash': digest_json(suite),
                   'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                   'source': source, 'case_ids': [c['id'] for c in cases],
                   'full_suite': len(cases) == len(suite['cases']),
                   'repeats': args.repeats, 'warmups': suite['warmups'],
                   'suite': suite, 'cases': {}, 'complete': False}
-        job = dict(source=source, phase='metadata', device=device, suite=suite)
+        job = dict(source=source, phase='metadata', device=device, suite=suite,
+                   implementation_hash=harness_hash)
         probe = invoke(args.python, directory / 'raw' / 'metadata', job, args.timeout)
         if probe['status'] != 'ok':
             report['error'] = probe
             write_json(directory / 'results.json', report)
             raise RuntimeError(f'GPU/environment preflight failed; see {probe["log"]}')
         report['environment'] = probe['environment']
+        if args.resume and (directory / 'results.json').is_file():
+            previous = json.loads((directory / 'results.json').read_text())
+            for key in ['source', 'implementation_hash', 'suite_hash', 'case_ids',
+                        'repeats', 'warmups', 'environment']:
+                if previous.get(key) != report.get(key):
+                    raise ValueError(f'Cannot resume: different {key}')
+            report = previous
+            report['complete'] = False
         reports.append(report)
         directories.append(directory)
         write_json(directory / 'results.json', report)
@@ -307,9 +332,14 @@ def run(args):
         if index % 2:
             order.reverse()
         for i in order:
+            if implementation_hash(suite) != harness_hash:
+                raise RuntimeError('Benchmark harness changed; preserve this run and start a new one')
+            if reports[i]['cases'].get(case['id'], {}).get('status') == 'ok':
+                continue
             print(f'{sources[i]["commit"][:12]} {case["id"]}', flush=True)
             job = dict(source=sources[i], phase='case', device=device, suite=suite,
-                       case=case, repeats=args.repeats)
+                       case=case, repeats=args.repeats, data_dir=str(Path(args.data_dir).resolve()))
+            job['implementation_hash'] = harness_hash
             record = invoke(args.python, directories[i] / 'raw' / case['id'], job, args.timeout)
             if record['status'] == 'ok' and record['environment'] != reports[i]['environment']:
                 record.update(status='error', error='Environment changed during the run')
@@ -344,12 +374,16 @@ def render_comparison(base, head):
               'K is the full target dimension; k is the sketch width used for structure search.',
               '`proj`: k projected components; `rand`/`filter`: k draws with replacement (at most k distinct outputs);',
               '`topk`: k distinct outputs. Full GradientBoosting uses all K outputs. Predictions always have K outputs.', '',
-              'Times are warmed wall-clock medians. GPU memory is peak live CuPy allocations,',
+              'Times per case are warmed wall-clock medians. GPU memory is peak live CuPy allocations,',
               'including the private fit pool; CUDA context, pool cache and external library allocations are excluded.',
               'Quality is a holdout metric (lower is better). These are measured changes, not statistical verdicts.', '',
               '| Case | Outputs K | Sketch k | Fit s (base → PR) | Δ fit | Predict s (base → PR) | Δ predict | Fit MiB (base → PR) | Δ memory | Quality (base → PR) |',
               '|---|---:|---|---:|---:|---:|---:|---:|---:|---:|']
     notes = []
+    if base.get('suite', {}).get('dataset', {}).get('name') == 'Delicious':
+        # Cross-validation folds are different datasets, not timing repetitions.
+        table_start = next(i for i, line in enumerate(lines) if line.startswith('| Case |'))
+        lines[table_start:table_start] = cv_summary(base, head)
     for case_id in base['case_ids']:
         a, b = base['cases'][case_id], head['cases'][case_id]
         def pair(section, key, scale=1):
@@ -371,7 +405,48 @@ def render_comparison(base, head):
         rb = [m['retained_trees'] for m in b['timing']['measurements']]
         if len(set(ra + rb)) > 1:
             notes.append(f'Retained tree counts differ for `{case_id}`: {ra} vs {rb}; interpret prediction timing with care.')
+        if 'fold' in spec:
+            ta = [m['trained_iterations'] for m in a['timing']['measurements']]
+            tb = [m['trained_iterations'] for m in b['timing']['measurements']]
+            notes.append(f'`{case_id}`: executed {ta} → {tb}; retained {ra} → {rb}.')
     return '\n'.join(lines + [''] + notes) + '\n'
+
+
+def cv_summary(base, head):
+    import numpy as np
+
+    lines = ['**Delicious: official first split; five shuffled train folds (seed 42).**',
+             'All 983 labels and 500 features; each fold: 10336 train / 2584 validation / 3185 test.',
+             'Five-fold means ± population standard deviations below; folds are not timing repeats.',
+             'Each memory peak is from a separate full fit; report the maximum across folds.',
+             'FilterSketch is an additional library coverage case, outside the paper.', '',
+             '| Method | K | k | Mean fit s (base → PR) | Δ fit | Mean predict s (base → PR) | Max fit MiB (base → PR) | Mean test log loss (base → PR) |',
+             '|---|---:|---:|---|---:|---|---|---|']
+    groups = list(dict.fromkeys(base['cases'][c]['spec']['group'] for c in base['case_ids']))
+    for group in groups:
+        ids = [c for c in base['case_ids'] if base['cases'][c]['spec']['group'] == group]
+        if len(ids) != 5:
+            lines.append(f'Incomplete CV group `{group}`: {len(ids)}/5 folds; no five-fold aggregate.')
+            continue
+        def values(report, section, key):
+            return [report['cases'][c][section][key] for c in ids]
+        def mean_pair(key):
+            pairs = []
+            means = []
+            for report in [base, head]:
+                data = [v['median'] for v in values(report, 'timing', key)]
+                means.append(float(np.mean(data)))
+                pairs.append(f'{means[-1]:.6g} ± {np.std(data):.3g}')
+            return ' → '.join(pairs), means
+        fit, means = mean_pair('fit_seconds')
+        predict, _ = mean_pair('predict_seconds')
+        score, _ = mean_pair('quality')
+        peaks = [max(values(r, 'memory', 'fit_cupy_peak_bytes')) / 2**20 for r in [base, head]]
+        spec = base['cases'][ids[0]]['spec']
+        k = spec['params'].get('sketch_outputs', 'all')
+        lines.append(f'| {group} | 983 | {k} | {fit} | {(means[1]/means[0]-1)*100:+.1f}% | {predict} | '
+                     f'{peaks[0]:.2f} → {peaks[1]:.2f} | {score} |')
+    return lines + ['', 'Per-fold measurements:', '']
 
 
 def main():
@@ -380,13 +455,18 @@ def main():
     command = commands.add_parser('run', help='Run one or more clean source checkouts')
     command.add_argument('--source', action='append', required=True, help='Git checkout; repeat to compare versions')
     command.add_argument('--suite', type=Path, default=DEFAULT_SUITE,
-                         help='Frozen suite manifest (default: suite-v1-k5.json, k=5)')
+                         help='Frozen suite manifest (default: Delicious paper protocol, k=5)')
     command.add_argument('--output', required=True)
     command.add_argument('--device', required=True, help='One physical GPU index or UUID')
     command.add_argument('--python', default=sys.executable, help='Interpreter containing the pinned dependencies')
-    command.add_argument('--repeats', type=int, default=load_suite()['repeats'])
+    command.add_argument('--repeats', type=int, default=None, help='Timing repeats per fold; default from suite')
     command.add_argument('--case', action='append', help='Diagnostic subset; omit for the full suite')
-    command.add_argument('--timeout', type=int, default=900, help='Seconds per worker, including warmup')
+    command.add_argument('--timeout', type=int, default=None, help='Seconds per worker; default from suite')
+    command.add_argument('--resume', action='store_true', help='Resume matching reports, skipping successful cases')
+    command.add_argument('--data-dir', type=Path, default=ROOT.parent / '.benchmark-data')
+    command = commands.add_parser('prepare-data', help='Download and verify the pinned Delicious dataset')
+    command.add_argument('--data-dir', type=Path, default=ROOT.parent / '.benchmark-data')
+    command.add_argument('--archive', type=Path, help='Use an existing original Delicious.zip without network')
     command = commands.add_parser('compare', help='Compare two archived results.json files')
     command.add_argument('base')
     command.add_argument('candidate')
@@ -395,6 +475,14 @@ def main():
     command.add_argument('job')
     command.add_argument('result')
     args = parser.parse_args()
+    if args.command == 'prepare-data':
+        if __package__:
+            from .delicious import prepare_data
+        else:
+            from delicious import prepare_data
+        destination, checksum = prepare_data(args.data_dir, args.archive)
+        print(f'{destination}\nSHA-256 (arrays and ordered splits): {checksum}')
+        return 0
     if args.command == '_worker':
         try:
             result = worker(json.loads(Path(args.job).read_text()))
