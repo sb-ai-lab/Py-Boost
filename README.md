@@ -98,9 +98,14 @@ compiled.dump('compiled.pkl')
 restored_compiled = TLCompiledPredictor.load('compiled.pkl')
 ```
 
+Threshold quantization can be enabled by passing `params={'quantize': 1}`
+to `compile()`; prediction keeps the original float32 split boundaries.
+
 `TLCompiledPredictor.predict()` also accepts SciPy sparse matrices (CSR, CSC
 and COO) without converting them to dense arrays. Unstored entries and stored
 NaNs are treated as missing values; explicitly stored zeros remain zero.
+Duplicate coordinates are summed in the input dtype before conversion to
+float32. Prediction leaves the input matrix unchanged.
 
 Compiled predictor dumps contain metadata and the library path. Deploy the
 `.so`/`.dll` alongside the dump. If its path changes, load it with

@@ -147,6 +147,90 @@ def test_compiled_sparse_inputs(ensemble, sparse_compiled, format, dtype, index_
         np.testing.assert_array_equal(actual_buffer, original_buffer)
 
 
+@pytest.mark.parametrize('format', ['csr', 'csc', 'coo'])
+@pytest.mark.parametrize('dtype', [np.float32, np.float64])
+@pytest.mark.parametrize('index_dtype', [np.int32, np.int64])
+def test_compiled_sparse_duplicate_coordinates(ensemble, sparse_compiled, format, dtype,
+                                               index_dtype, monkeypatch):
+    # Include unsorted duplicates, a sum crossing a split, cancellation to an
+    # explicitly stored zero, and NaN in either position among duplicates.
+    large = 1e8 if dtype == np.float64 else 1e4
+    X = sparse.csr_matrix((
+        np.array([.4, -1, .4, np.nan, -1, 1, 1, -1, np.nan,
+                  .25, .25, -.25, -.25, np.nan, 0, -1, .2, 0, .2,
+                  large, .75, -large, -1], dtype=dtype),
+        [0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1],
+        [0, 3, 6, 9, 13, 16, 19, 23],
+    ), shape=(7, 2)).asformat(format)
+    if format == 'coo':
+        X.row = X.row.astype(index_dtype)
+        X.col = X.col.astype(index_dtype)
+        fields = ('row', 'col')
+    else:
+        X.indices = X.indices.astype(index_dtype)
+        X.indptr = X.indptr.astype(index_dtype)
+        assert not X.has_canonical_format
+        fields = ('indices', 'indptr')
+    original = copy.deepcopy(X)
+
+    def no_dense(*args, **kwargs):
+        pytest.fail('Sparse prediction must not densify its input')
+
+    for cls in (sparse.csr_matrix, sparse.csc_matrix, sparse.coo_matrix):
+        monkeypatch.setattr(cls, 'toarray', no_dense)
+
+    expected = np.array([
+        [-4, 4, 7], [2, -4, 5.5], [2, -4, 5.5],
+        [2, -4, 5.5], [4, 2, 4], [4, 2, 4], [-4, 4, 7],
+    ], dtype=np.float32)[:, :len(ensemble.base_score)]
+    np.testing.assert_allclose(sparse_compiled.predict(X), expected)
+    np.testing.assert_array_equal(X.data, original.data)
+    for field in fields:
+        actual_buffer, original_buffer = getattr(X, field), getattr(original, field)
+        assert actual_buffer.dtype == original_buffer.dtype
+        np.testing.assert_array_equal(actual_buffer, original_buffer)
+    if format != 'coo':
+        assert not X.has_canonical_format
+
+
+@pytest.mark.parametrize('threshold', [-0.11849978566169739, 0.11849978566169739])
+@pytest.mark.parametrize('nan_left', [False, True])
+@pytest.mark.parametrize('parallel_comp', [0, 2])
+def test_quantized_threshold_equality(ensemble, tmp_path, toolchain, threshold,
+                                    nan_left, parallel_comp):
+    threshold = np.float32(threshold)
+    # TL2cgen 1.0 rounds these float32 thresholds to a different value when
+    # emitting its quantizer array with only eight significant decimal digits.
+    assert np.float32(format(threshold, '.8g')) != threshold
+    model = CPUEnsemble(len(ensemble.base_score))
+    model.models[0].test_format = np.array([
+        -1 if nan_left else 1, threshold, -1, -2,
+    ], dtype=np.float32)
+    predictor = TLPredictor(model)
+    # Exercise old checkpoints too: the fix must run at compilation time.
+    predictor.dump(tmp_path / 'gtil')
+    predictor = TLPredictor.load(tmp_path / 'gtil')
+    before = predictor.tl_model.dump_as_json()
+    name, suffix = toolchain
+    params = {'quantize': 1, 'parallel_comp': parallel_comp}
+    compiled = predictor.compile(name, tmp_path / ('quantized' + suffix),
+                                 params=params, nthread=2)
+    assert params == {'quantize': 1, 'parallel_comp': parallel_comp}
+    assert predictor.tl_model.dump_as_json() == before
+
+    X = np.zeros((6, 2), dtype=np.float32)
+    X[:, 0] = [np.nextafter(threshold, np.float32(-np.inf)), threshold,
+               np.nextafter(threshold, np.float32(np.inf)), np.nan, -np.inf, np.inf]
+    left, right = [2, -4, 5.5], [4, 2, 4]
+    expected = np.array([left, left, right, left if nan_left else right, left, right],
+                        dtype=np.float32)[:, :len(ensemble.base_score)]
+    np.testing.assert_allclose(predictor.predict(X), expected)
+    for data in (X, X.astype(np.float64), sparse.csr_matrix(X)):
+        actual = compiled.predict(data)
+        assert actual.dtype == np.float32
+        np.testing.assert_allclose(actual, expected)
+
+
 def test_shallow_copy_keeps_native_predictors(ensemble, compiled, examples):
     X, expected = examples
     expected = expected[:, :len(ensemble.base_score)]

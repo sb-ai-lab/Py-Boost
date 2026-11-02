@@ -99,7 +99,13 @@ def _prepare_tl2cgen_input(X):
     # The new sparse object may share buffers with X; replace rather than mutate
     # those buffers. TL2cgen treats unstored entries as missing, but does not
     # recognize NaNs stored explicitly in a CSR buffer. Drop only NaNs, not zeros.
-    matrix = csr_matrix(X, dtype=np.float32, copy=False)
+    matrix = csr_matrix(X, copy=False)
+    if not matrix.has_canonical_format:
+        matrix = matrix.copy()
+        matrix.sum_duplicates()
+    # Sum in the input dtype before casting, as COO conversion already does.
+    # In particular, NaN plus another stored value must remain missing.
+    matrix = matrix.astype(np.float32, copy=False)
     missing = np.isnan(matrix.data)
     if missing.any():
         missing_rows = np.searchsorted(matrix.indptr, np.flatnonzero(missing), side='right') - 1
@@ -114,6 +120,36 @@ def _prepare_tl2cgen_input(X):
     matrix.indices = np.ascontiguousarray(matrix.indices, dtype=np.uintc)
     matrix.indptr = np.ascontiguousarray(matrix.indptr, dtype=np.uintp)
     return matrix
+
+
+def _prepare_tl2cgen_model(model):
+    """Preserve float32 split boundaries in TL2cgen's eight-digit quantizer."""
+    if model.input_type != 'float32':
+        return model
+    prepared = None
+    for tree_id in range(model.num_tree):
+        tree = model.get_tree_accessor(tree_id)
+        thresholds = tree.get_field('threshold')
+        comparison = tree.get_field('cmp')
+        # Treelite's Operator enum uses kLE=3 and kLT=2.
+        candidates = np.flatnonzero((comparison == 3) & np.isfinite(thresholds))
+        affected = [i for i in candidates
+                    if np.float32(format(thresholds[i], '.8g')) != thresholds[i]]
+        if not affected:
+            continue
+        if prepared is None:
+            prepared = treelite.Model.deserialize_bytes(model.serialize_bytes())
+        thresholds, comparison = thresholds.copy(), comparison.copy()
+        # Adjacent float32 values have no representable value between them:
+        # x <= t is equivalent to x < nextafter(t, +inf). If t fails the
+        # eight-digit round trip, its successor round-trips exactly. Change
+        # only the compilation copy, including when loading old checkpoints.
+        thresholds[affected] = np.nextafter(thresholds[affected], np.float32(np.inf))
+        comparison[affected] = 2
+        tree = prepared.get_tree_accessor(tree_id)
+        tree.set_field('threshold', thresholds)
+        tree.set_field('cmp', comparison)
+    return model if prepared is None else prepared
 
 
 class TLCompiledPredictor:
@@ -269,9 +305,12 @@ class TLPredictor:
             raise ValueError("TL2cgen only supports compiler='ast_native'")
         params = {} if params is None else params
         params = {**{'parallel_comp': os.cpu_count() or 1}, **params}
+        model = self.tl_model
+        if params.get('quantize', 0) > 0:
+            model = _prepare_tl2cgen_model(model)
 
         tl2cgen.export_lib(
-            self.tl_model, toolchain=toolchain, libpath=libpath, params=params,
+            model, toolchain=toolchain, libpath=libpath, params=params,
             verbose=verbose, nthread=nthread, options=options,
         )
 
