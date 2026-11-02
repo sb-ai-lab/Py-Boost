@@ -41,8 +41,8 @@ ujson = '*'
 pandas = ">=1"
 onnx = ">=1.16, <2"
 onnxruntime = ">=1.16, <2"
-treelite = "^3"
-treelite_runtime = "^3"
+treelite = ">=4.1.2,<5"
+tl2cgen = ">=1,<2"
 
 tqdm = ">=4.64.1"
 
