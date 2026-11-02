@@ -4,8 +4,8 @@ The default `pyboost-delicious-paper-v1-k5` compares library revisions on the re
 **Delicious** multilabel dataset from the
 [SketchBoost paper, Appendix B](https://arxiv.org/html/2211.12858v1#A2).
 It follows the paper's evaluation protocol and chosen hyperparameters, without
-rerunning hyperparameter search or competing libraries. It can take hours on one
-GPU; the old ten-minute synthetic budget no longer applies.
+rerunning hyperparameter search or competing libraries. The full comparison can take days on one GPU, especially the unsketched baseline
+with separate memory fits; the old ten-minute synthetic budget no longer applies.
 
 ## Frozen data and protocol
 
@@ -100,7 +100,7 @@ both versions. GitHub Actions does not need a GPU worker.
 Commit library changes before running. Reports record source SHAs, imported paths
 and source checksums; cases alternate version order. Each method/fold is saved in
 `<output>/<commit>/results.json` alongside raw worker jobs, results and logs.
-Default timeout is **24 hours per worker**, including warmup, timing and memory.
+Default timeout is **72 hours per worker**, including warmup, timing and memory.
 Failed cases, OOM and timeouts are failures, never skipped passes.
 
 Repeat the same command with `--resume` to skip completed cases and retry unfinished
@@ -129,7 +129,7 @@ that fold and is excluded from timing. It does not run 20000 warmup iterations.
    exclude context, free pool cache and external allocations; they are not total
    process VRAM. CPU RSS includes resident input data and can miss short peaks.
 
-The summary reports **five-fold means ± population standard deviations** for fit,
+The summary reports **five-fold means ± sample standard deviations (`ddof=1`)** for fit,
 prediction and test log loss, plus maximum fit GPU allocation across folds. JSON
 preserves each fold's timing/memory, test quality, executed iterations and retained
 trees for both phases. Folds are different datasets, not five repeats of one fit.

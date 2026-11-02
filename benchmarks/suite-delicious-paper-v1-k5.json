@@ -501,7 +501,7 @@
     }
   ],
   "warmup_iterations": 32,
-  "timeout": 86400,
+  "timeout": 259200,
   "dataset": {
     "name": "Delicious",
     "rows": 16105,

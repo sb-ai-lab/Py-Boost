@@ -13,7 +13,7 @@ Use the paper's parameters, up to 20000 iterations and early stopping after 500
 rounds. Each fold has one timing run after a 32-iteration warmup and a separate
 full memory run. Five CV folds are not five timing repetitions. Do not substitute
 synthetic data, truncate the iteration limit or drop methods/folds in a required
-run. This protocol can take hours; there is no ten-minute limit.
+run. This protocol can take days; there is no ten-minute limit.
 
 - Commit library changes first. Record both code SHAs and the benchmark/data
   checksums. Verify that the imported library comes from the intended checkout.

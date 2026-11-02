@@ -114,7 +114,7 @@ sources may be measured in one run; compare any two results afterward:
 ```
 
 `--python /path/to/environment/bin/python` selects the worker interpreter.
-`--case mse-single --repeats 1` is a diagnostic subset, not the mandatory full
+`--case mse-single --repeats 1` is a diagnostic subset of this legacy
 profile. Output directories must be empty so previous evidence is not overwritten.
 Workers have a 900-second timeout including setup/warmup and both phases; failures and OOM retain
 logs/results, and the command exits nonzero. A version lacking a required API is
@@ -153,7 +153,8 @@ implementation checksum, manifest checksum, actual dataset checksum, GPU UUID,
 CPU/OS, Python, relevant dependency versions, CUDA driver/runtime, repetitions and
 warmups. `compare` refuses mismatched workloads, datasets, environments or failed
 measurements (exit code 2). Partial runs are marked `full_suite: false`; only a full
-five-repeat run satisfies the PR requirement. Comparison tables show measured
+five-repeat run completes this legacy profile. The current PR requirement uses
+Delicious; see README.md. Comparison tables show measured
 changes, not an automatic statistical pass/fail verdict.
 
 To compare historical versions, run them through **this same harness** and pinned

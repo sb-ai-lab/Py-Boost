@@ -80,7 +80,7 @@ def test_cv_uses_mean_not_median_and_maximum_memory():
         base['case_ids'].append(key)
     candidate = deepcopy(base)
     text = '\n'.join(cv_summary(base, candidate))
-    assert '| delicious-proj | 983 | 5 | 2 ± 2 → 2 ± 2 |' in text
+    assert '| delicious-proj | 983 | 5 | 2 ± 2.24 → 2 ± 2.24 |' in text
     assert '| 5.00 → 5.00 |' in text
     base['case_ids'].pop()
     assert 'Incomplete CV group' in '\n'.join(cv_summary(base, base))

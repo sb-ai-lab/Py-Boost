@@ -417,7 +417,7 @@ def cv_summary(base, head):
 
     lines = ['**Delicious: official first split; five shuffled train folds (seed 42).**',
              'All 983 labels and 500 features; each fold: 10336 train / 2584 validation / 3185 test.',
-             'Five-fold means ± population standard deviations below; folds are not timing repeats.',
+             'Five-fold means ± sample standard deviations (ddof=1), as in the paper; folds are not timing repeats.',
              'Each memory peak is from a separate full fit; report the maximum across folds.',
              'FilterSketch is an additional library coverage case, outside the paper.', '',
              '| Method | K | k | Mean fit s (base → PR) | Δ fit | Mean predict s (base → PR) | Max fit MiB (base → PR) | Mean test log loss (base → PR) |',
@@ -436,7 +436,7 @@ def cv_summary(base, head):
             for report in [base, head]:
                 data = [v['median'] for v in values(report, 'timing', key)]
                 means.append(float(np.mean(data)))
-                pairs.append(f'{means[-1]:.6g} ± {np.std(data):.3g}')
+                pairs.append(f'{means[-1]:.6g} ± {np.std(data, ddof=1):.3g}')
             return ' → '.join(pairs), means
         fit, means = mean_pair('fit_seconds')
         predict, _ = mean_pair('predict_seconds')
