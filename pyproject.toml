@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "Py-Boost"
-version = "0.5.2"
+version = "0.6.0.dev1"
 description = "Python based GBDT"
 
 authors = [
