@@ -1,0 +1,231 @@
+{
+  "benchmark_id": "pyboost-gpu-v1-k5",
+  "data_seed": 20261030,
+  "model_seed": 42,
+  "cpu_threads": 4,
+  "warmups": 1,
+  "repeats": 5,
+  "sketch_params": {
+    "proj": {
+      "norm": true
+    },
+    "rand": {
+      "smooth": 0.1,
+      "replace": true
+    },
+    "filter": {
+      "sample": true,
+      "smooth": 0.1,
+      "ntrees": 1
+    },
+    "topk": {}
+  },
+  "common_params": {
+    "ntrees": 32,
+    "max_depth": 4,
+    "max_bin": 64,
+    "lr": 0.1,
+    "es": 0,
+    "verbose": 1000000,
+    "min_data_in_leaf": 10,
+    "colsample": 1.0,
+    "subsample": 1.0,
+    "use_hess": true,
+    "lambda_l2": 1.0,
+    "gd_steps": 1,
+    "min_gain_to_split": 0,
+    "quantization": "Quantile",
+    "quant_sample": 2000000,
+    "min_data_in_bin": 3
+  },
+  "cases": [
+    {
+      "id": "mse-single",
+      "task": "regression",
+      "model": "GradientBoosting",
+      "loss": "mse",
+      "train": 16384,
+      "valid": 4096,
+      "test": 4096,
+      "features": 32,
+      "outputs": 1,
+      "validation_sets": 1,
+      "params": {}
+    },
+    {
+      "id": "mse-full-128",
+      "task": "regression",
+      "model": "GradientBoosting",
+      "loss": "mse",
+      "train": 8192,
+      "valid": 2048,
+      "test": 2048,
+      "features": 32,
+      "outputs": 128,
+      "validation_sets": 1,
+      "params": {}
+    },
+    {
+      "id": "mse-proj-32",
+      "task": "regression",
+      "model": "SketchBoost",
+      "loss": "mse",
+      "train": 16384,
+      "valid": 4096,
+      "test": 4096,
+      "features": 32,
+      "outputs": 32,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "proj",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "mse-proj-128",
+      "task": "regression",
+      "model": "SketchBoost",
+      "loss": "mse",
+      "train": 16384,
+      "valid": 4096,
+      "test": 4096,
+      "features": 32,
+      "outputs": 128,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "proj",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "mse-proj-1024",
+      "task": "regression",
+      "model": "SketchBoost",
+      "loss": "mse",
+      "train": 16384,
+      "valid": 4096,
+      "test": 4096,
+      "features": 32,
+      "outputs": 1024,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "proj",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "mse-proj-10000",
+      "task": "regression",
+      "model": "SketchBoost",
+      "loss": "mse",
+      "train": 16384,
+      "valid": 4096,
+      "test": 4096,
+      "features": 32,
+      "outputs": 10000,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "proj",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "bce-rand-1024",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 16384,
+      "valid": 4096,
+      "test": 4096,
+      "features": 32,
+      "outputs": 1024,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "rand",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "bce-filter-1024",
+      "task": "multilabel",
+      "model": "SketchBoost",
+      "loss": "multilabel",
+      "train": 16384,
+      "valid": 4096,
+      "test": 4096,
+      "features": 32,
+      "outputs": 1024,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "filter",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "mse-topk-10000",
+      "task": "regression",
+      "model": "SketchBoost",
+      "loss": "mse",
+      "train": 4096,
+      "valid": 1024,
+      "test": 1024,
+      "features": 32,
+      "outputs": 10000,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "topk",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "ce-proj-512",
+      "task": "multiclass",
+      "model": "SketchBoost",
+      "loss": "crossentropy",
+      "train": 16384,
+      "valid": 4096,
+      "test": 4096,
+      "features": 32,
+      "outputs": 512,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "proj",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "validation-proj-1024",
+      "task": "regression",
+      "model": "SketchBoost",
+      "loss": "mse",
+      "train": 8192,
+      "valid": 32768,
+      "test": 4096,
+      "features": 32,
+      "outputs": 1024,
+      "validation_sets": 2,
+      "params": {
+        "sketch_method": "proj",
+        "sketch_outputs": 5
+      }
+    },
+    {
+      "id": "histogram-topk-128",
+      "task": "regression",
+      "model": "SketchBoost",
+      "loss": "mse",
+      "train": 8192,
+      "valid": 2048,
+      "test": 2048,
+      "features": 128,
+      "outputs": 128,
+      "validation_sets": 1,
+      "params": {
+        "sketch_method": "topk",
+        "sketch_outputs": 5,
+        "max_depth": 8,
+        "max_bin": 256
+      }
+    }
+  ]
+}
