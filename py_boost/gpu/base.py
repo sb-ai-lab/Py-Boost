@@ -4,7 +4,7 @@ import warnings
 try:
     import cupy as cp
 except Exception:
-    pass
+    cp = None
 import numpy as np
 
 from .serialization import dump, load
@@ -37,30 +37,29 @@ class Ensemble:
         self.seed = 42
 
     def to_device(self):
-        """Move trained ensemble data to current GPU device
-
-        Returns:
-
-        """
+        """Move trained ensemble data to GPU, undoing a partial failed transfer."""
         if not self._on_device:
-            for tree in self.models:
-                tree.to_device()
-            self.base_score = cp.asarray(self.base_score)
+            try:
+                for tree in self.models:
+                    tree.to_device()
+                self.base_score = cp.asarray(self.base_score)
+            except Exception:
+                self.to_cpu()
+                raise
 
             self._on_device = True
 
     def to_cpu(self):
-        """Move trained ensemble data to CPU memory
-
-        Returns:
-
-        """
-        if self._on_device:
-            for tree in self.models:
+        """Move all GPU arrays to CPU, including an incomplete device transfer."""
+        # A failed transfer can leave GPU arrays while _on_device is still False.
+        # With no CuPy installed, CPU-only export/serialization needs no cleanup.
+        if cp is not None:
+            for tree in self.models or []:
                 tree.to_cpu()
-            self.base_score = self.base_score.get()
+            if isinstance(self.base_score, cp.ndarray):
+                self.base_score = self.base_score.get()
 
-            self._on_device = False
+        self._on_device = False
 
     def __getstate__(self):
         """Get state dict on CPU for picking
